@@ -116,6 +116,8 @@ namespace MassaKWin
             dgvScales.Columns.Add("Tare", "Tare, кг");
             dgvScales.Columns.Add("Stable", "Stable");
             dgvScales.Columns.Add("Online", "Online");
+            // Колонка с текстовым статусом и временем нахождения в состоянии
+            dgvScales.Columns.Add("Status", "Статус");
 
             // TODO: привязать к ScaleManager и заполнить источником данных
 
@@ -208,6 +210,8 @@ namespace MassaKWin
         {
             dgvScales.Rows.Clear();
 
+            var now = DateTime.UtcNow;
+
             foreach (var scale in _scaleManager.Scales)
             {
                 string name = scale.Name;
@@ -216,9 +220,14 @@ namespace MassaKWin
                 string netKg = (scale.State.NetGrams / 1000.0).ToString("F3");
                 string tareKg = (scale.State.TareGrams / 1000.0).ToString("F3");
                 string stable = scale.State.Stable ? "Да" : "Нет";
-                string online = scale.State.IsOnline(_offlineThreshold) ? "Да" : "Нет";
+                var age = now - scale.State.LastUpdateUtc;
+                bool online = scale.State.IsOnline(_offlineThreshold);
+                string onlineText = online ? "Да" : "Нет";
+                string statusText = online
+                    ? $"Online {age:hh\\:mm\\:ss}"
+                    : $"Offline {age:hh\\:mm\\:ss}";
 
-                dgvScales.Rows.Add(name, ipPort, protocol, netKg, tareKg, stable, online);
+                dgvScales.Rows.Add(name, ipPort, protocol, netKg, tareKg, stable, onlineText, statusText);
             }
         }
 

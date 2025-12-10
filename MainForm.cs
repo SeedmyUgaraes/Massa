@@ -31,6 +31,7 @@ namespace MassaKWin
         private Button _btnDeleteScale;
         private Button _btnAddCamera;
         private Button _btnDeleteCamera;
+        private Button _btnEditBindings;
 
         public MainForm()
         {
@@ -168,6 +169,13 @@ namespace MassaKWin
             };
             _btnDeleteCamera.Click += OnDeleteCameraClicked;
 
+            _btnEditBindings = new Button
+            {
+                Text = "Привязки…",
+                Height = 35
+            };
+            _btnEditBindings.Click += OnEditBindingsClicked;
+
             var camerasPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
@@ -177,6 +185,7 @@ namespace MassaKWin
             };
             camerasPanel.Controls.Add(_btnAddCamera);
             camerasPanel.Controls.Add(_btnDeleteCamera);
+            camerasPanel.Controls.Add(_btnEditBindings);
 
             tabCameras.Controls.Add(dgvCameras);
             tabCameras.Controls.Add(camerasPanel);
@@ -306,6 +315,24 @@ namespace MassaKWin
                     }
 
                     _cameraManager.Cameras.Add(cam);
+                    RecreateCameraOsdService();
+                    RefreshCamerasGrid();
+                }
+            }
+        }
+
+        private void OnEditBindingsClicked(object? sender, EventArgs e)
+        {
+            if (dgvCameras.CurrentRow == null) return;
+            int rowIndex = dgvCameras.CurrentRow.Index;
+            if (rowIndex < 0 || rowIndex >= _cameraManager.Cameras.Count) return;
+
+            var cam = _cameraManager.Cameras[rowIndex];
+
+            using (var dlg = new CameraBindingsForm(cam, _scaleManager))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
                     RecreateCameraOsdService();
                     RefreshCamerasGrid();
                 }

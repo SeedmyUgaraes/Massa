@@ -46,6 +46,7 @@ namespace MassaKWin
                 offlineThreshold: _offlineThreshold,
                 reconnectDelay: TimeSpan.FromSeconds(5));
 
+            _massaClient.LogMessage += AppendLog;
             _massaClient.ScaleUpdated += OnScaleUpdated;
             _massaClient.Start();
 
@@ -181,6 +182,14 @@ namespace MassaKWin
         {
             _historyManager.AddSample(scale);
             BeginInvoke(new Action(RefreshScalesGrid));
+        }
+
+        private void AppendLog(string message)
+        {
+            BeginInvoke(new Action(() =>
+            {
+                txtLog.AppendText(message + Environment.NewLine);
+            }));
         }
 
         private void OnFormClosing(object sender, FormClosingEventArgs e)

@@ -9,10 +9,13 @@ namespace MassaKWin
     {
         private readonly ScaleManager _scaleManager;
         private readonly WeightHistoryManager _historyManager;
-        private readonly MassaKClient _massaClient;
+        private MassaKClient? _massaClient;
         private CameraManager _cameraManager;
         private CameraOsdService? _cameraOsdService;
+        private readonly TimeSpan _pollInterval = TimeSpan.FromMilliseconds(200);
+        private readonly TimeSpan _connectTimeout = TimeSpan.FromSeconds(3);
         private readonly TimeSpan _offlineThreshold = TimeSpan.FromSeconds(10);
+        private readonly TimeSpan _reconnectDelay = TimeSpan.FromSeconds(5);
         private readonly Timer _uiTimer;
 
         private TabControl tabControl;
@@ -25,7 +28,9 @@ namespace MassaKWin
         private DataGridView dgvCameras;
         private TextBox txtLog;
         private Button _btnAddScale;
+        private Button _btnDeleteScale;
         private Button _btnAddCamera;
+        private Button _btnDeleteCamera;
 
         public MainForm()
         {
@@ -40,27 +45,10 @@ namespace MassaKWin
             _historyManager = new WeightHistoryManager();
             _scaleManager.OfflineThreshold = _offlineThreshold;
 
-            _massaClient = new MassaKClient(
-                _scaleManager.Scales,
-                pollInterval: TimeSpan.FromMilliseconds(200),
-                connectTimeout: TimeSpan.FromSeconds(3),
-                offlineThreshold: _offlineThreshold,
-                reconnectDelay: TimeSpan.FromSeconds(5));
-
-            _massaClient.LogMessage += AppendLog;
-            _massaClient.ScaleUpdated += OnScaleUpdated;
-            _massaClient.Start();
-
             _cameraManager = new CameraManager();
 
-            _cameraOsdService = new CameraOsdService(
-                _cameraManager.Cameras,
-                _scaleManager,
-                TimeSpan.FromMilliseconds(100));
-
-            _cameraOsdService.LogMessage += AppendLog;
-
-            _cameraOsdService.Start();
+            RecreateScaleClient();
+            RecreateCameraOsdService();
 
             _uiTimer = new Timer
             {
@@ -124,17 +112,26 @@ namespace MassaKWin
             _btnAddScale = new Button
             {
                 Text = "Добавить весы",
-                Dock = DockStyle.Top,
                 Height = 35
             };
             _btnAddScale.Click += OnAddScaleClicked;
 
-            var scalesPanel = new Panel
+            _btnDeleteScale = new Button
+            {
+                Text = "Удалить весы",
+                Height = 35
+            };
+            _btnDeleteScale.Click += OnDeleteScaleClicked;
+
+            var scalesPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 40
+                Height = 40,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false
             };
             scalesPanel.Controls.Add(_btnAddScale);
+            scalesPanel.Controls.Add(_btnDeleteScale);
 
             tabScales.Controls.Add(dgvScales);
             tabScales.Controls.Add(scalesPanel);
@@ -160,17 +157,26 @@ namespace MassaKWin
             _btnAddCamera = new Button
             {
                 Text = "Добавить камеру",
-                Dock = DockStyle.Top,
                 Height = 35
             };
             _btnAddCamera.Click += OnAddCameraClicked;
 
-            var camerasPanel = new Panel
+            _btnDeleteCamera = new Button
+            {
+                Text = "Удалить камеру",
+                Height = 35
+            };
+            _btnDeleteCamera.Click += OnDeleteCameraClicked;
+
+            var camerasPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 40
+                Height = 40,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false
             };
             camerasPanel.Controls.Add(_btnAddCamera);
+            camerasPanel.Controls.Add(_btnDeleteCamera);
 
             tabCameras.Controls.Add(dgvCameras);
             tabCameras.Controls.Add(camerasPanel);
@@ -270,8 +276,10 @@ namespace MassaKWin
                 {
                     var scale = dlg.Scale;
                     _scaleManager.Scales.Add(scale);
-                    _massaClient?.Start();
+                    RecreateScaleClient();
+                    RecreateCameraOsdService();
                     RefreshScalesGrid();
+                    RefreshCamerasGrid();
                 }
             }
         }
@@ -298,10 +306,68 @@ namespace MassaKWin
                     }
 
                     _cameraManager.Cameras.Add(cam);
-                    _cameraOsdService?.Start();
+                    RecreateCameraOsdService();
                     RefreshCamerasGrid();
                 }
             }
+        }
+
+        private void OnDeleteScaleClicked(object? sender, EventArgs e)
+        {
+            if (dgvScales.CurrentRow == null) return;
+            int rowIndex = dgvScales.CurrentRow.Index;
+            if (rowIndex < 0 || rowIndex >= _scaleManager.Scales.Count) return;
+
+            var scale = _scaleManager.Scales[rowIndex];
+
+            var result = MessageBox.Show(
+                $"Удалить весы \"{scale.Name}\"?",
+                "Подтверждение удаления",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result != DialogResult.Yes)
+                return;
+
+            foreach (var cam in _cameraManager.Cameras)
+            {
+                for (int i = cam.Bindings.Count - 1; i >= 0; i--)
+                {
+                    if (cam.Bindings[i].Scale != null && cam.Bindings[i].Scale.Id == scale.Id)
+                        cam.Bindings.RemoveAt(i);
+                }
+            }
+
+            _scaleManager.Scales.Remove(scale);
+
+            RecreateScaleClient();
+            RecreateCameraOsdService();
+
+            RefreshScalesGrid();
+            RefreshCamerasGrid();
+        }
+
+        private void OnDeleteCameraClicked(object? sender, EventArgs e)
+        {
+            if (dgvCameras.CurrentRow == null) return;
+            int rowIndex = dgvCameras.CurrentRow.Index;
+            if (rowIndex < 0 || rowIndex >= _cameraManager.Cameras.Count) return;
+
+            var cam = _cameraManager.Cameras[rowIndex];
+
+            var result = MessageBox.Show(
+                $"Удалить камеру \"{cam.Name}\"?",
+                "Подтверждение удаления",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result != DialogResult.Yes)
+                return;
+
+            _cameraManager.Cameras.Remove(cam);
+
+            RecreateCameraOsdService();
+            RefreshCamerasGrid();
         }
 
         private void AppendLog(string message)
@@ -312,15 +378,41 @@ namespace MassaKWin
             }));
         }
 
+        private void RecreateScaleClient()
+        {
+            _massaClient?.StopAsync().GetAwaiter().GetResult();
+
+            _massaClient = new MassaKClient(
+                _scaleManager.Scales,
+                pollInterval: _pollInterval,
+                connectTimeout: _connectTimeout,
+                offlineThreshold: _offlineThreshold,
+                reconnectDelay: _reconnectDelay);
+
+            _massaClient.LogMessage += AppendLog;
+            _massaClient.ScaleUpdated += OnScaleUpdated;
+            _massaClient.Start();
+        }
+
+        private void RecreateCameraOsdService()
+        {
+            _cameraOsdService?.StopAsync().GetAwaiter().GetResult();
+
+            _cameraOsdService = new CameraOsdService(
+                _cameraManager.Cameras,
+                _scaleManager,
+                TimeSpan.FromMilliseconds(100));
+
+            _cameraOsdService.LogMessage += AppendLog;
+
+            _cameraOsdService.Start();
+        }
+
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
             _uiTimer.Stop();
-            _massaClient.StopAsync().GetAwaiter().GetResult();
-            if (_cameraOsdService != null)
-            {
-                _cameraOsdService.StopAsync().GetAwaiter().GetResult();
-                _cameraOsdService = null;
-            }
+            _massaClient?.StopAsync().GetAwaiter().GetResult();
+            _cameraOsdService?.StopAsync().GetAwaiter().GetResult();
         }
     }
 }

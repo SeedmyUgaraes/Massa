@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "U5lMRwsYvEs=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\qbbii\\Downloads\\Massa-main\\MassaKWin.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\qbbii\\.nuget\\packages\\winforms.datavisualization\\1.10.0\\winforms.datavisualization.1.10.0.nupkg.sha512",
+    "C:\\Users\\qbbii\\.nuget\\packages\\microsoft.net.sdk.compilers.toolset\\9.0.304\\microsoft.net.sdk.compilers.toolset.9.0.304.nupkg.sha512"
+  ],
+  "logs": []
+}

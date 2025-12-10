@@ -9,7 +9,6 @@ namespace MassaKWin.Core
 {
     /// <summary>
     /// Клиент для опроса весов Massa-K по протоколу 100.
-    /// В этом стартере реализован только каркас. Логику протокола можно перенести из существующей консольной программы.
     /// </summary>
     public class MassaKClient
     {
@@ -32,7 +31,7 @@ namespace MassaKWin.Core
             TimeSpan offlineThreshold,
             TimeSpan reconnectDelay)
         {
-            _scales = scales;
+            _scales = scales ?? throw new ArgumentNullException(nameof(scales));
             _pollInterval = pollInterval;
             _connectTimeout = connectTimeout;
             _offlineThreshold = offlineThreshold;
@@ -47,8 +46,10 @@ namespace MassaKWin.Core
                     continue;
 
                 var cts = new CancellationTokenSource();
+                var task = Task.Run(() => PollLoopAsync(scale, cts.Token), cts.Token);
+
                 _tokens[scale.Id] = cts;
-                _tasks[scale.Id] = Task.Run(() => PollLoopAsync(scale, cts.Token));
+                _tasks[scale.Id] = task;
             }
         }
 
@@ -59,7 +60,16 @@ namespace MassaKWin.Core
                 kv.Value.Cancel();
             }
 
-            await Task.WhenAll(_tasks.Values);
+            try
+            {
+                if (_tasks.Count > 0)
+                    await Task.WhenAll(_tasks.Values);
+            }
+            catch
+            {
+                // игнорируем ошибки при остановке
+            }
+
             _tasks.Clear();
             _tokens.Clear();
         }
@@ -77,9 +87,13 @@ namespace MassaKWin.Core
                     await ConnectWithTimeoutAsync(client, scale.Ip, scale.Port, _connectTimeout, token);
                     stream = client.GetStream();
 
+                    LogMessage?.Invoke(
+                        $"[{DateTime.Now:HH:mm:ss}] Подключение к весам \"{scale.Name}\" ({scale.Ip}:{scale.Port}) успешно.");
+
                     while (!token.IsCancellationRequested)
                     {
-                        await stream.WriteAsync(BuildGetMassaRequest(), 0, 8, token);
+                        var request = BuildGetMassaRequest();
+                        await stream.WriteAsync(request, 0, request.Length, token);
 
                         var payload = await ReadPacketAsync(stream, token);
                         ParsePacket(scale, payload);
@@ -90,12 +104,13 @@ namespace MassaKWin.Core
                 }
                 catch (OperationCanceledException)
                 {
+                    // нормальное завершение
                     break;
                 }
                 catch (Exception ex)
                 {
                     LogMessage?.Invoke(
-                        $"[{DateTime.Now:HH:mm:ss}] {scale.Name} {scale.Ip}:{scale.Port} {ex.GetType().Name}: {ex.Message}");
+                        $"[{DateTime.Now:HH:mm:ss}] Ошибка опроса весов \"{scale.Name}\" ({scale.Ip}:{scale.Port}): {ex.GetType().Name}: {ex.Message}");
                 }
                 finally
                 {
@@ -103,17 +118,24 @@ namespace MassaKWin.Core
                     try { client?.Close(); } catch { }
                 }
 
-                if (!token.IsCancellationRequested)
+                if (token.IsCancellationRequested)
+                    break;
+
+                try
                 {
-                    try
-                    {
-                        await Task.Delay(_reconnectDelay, token);
-                    }
-                    catch (OperationCanceledException) { break; }
+                    await Task.Delay(_reconnectDelay, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
                 }
             }
         }
 
+        /// <summary>
+        /// Формирует запрос CMD_GET_MASSA (0x23) по протоколу 100.
+        /// Заголовок: F8 55 CE, длина: 0x0001, тело: 0x23, CRC по телу.
+        /// </summary>
         private byte[] BuildGetMassaRequest()
         {
             byte[] header = { 0xF8, 0x55, 0xCE };
@@ -136,23 +158,46 @@ namespace MassaKWin.Core
 
         private async Task<byte[]> ReadPacketAsync(NetworkStream stream, CancellationToken token)
         {
+            // читаем заголовок
             var header = await ReadExactAsync(stream, 3, token);
             if (header[0] != 0xF8 || header[1] != 0x55 || header[2] != 0xCE)
                 throw new IOException("Invalid header");
 
-            var lenBuf = await ReadExactAsync(stream, 2, token);
-            int payloadLen = BitConverter.ToInt16(lenBuf, 0);
+            // читаем длину (little-endian)
+            var lenBytes = await ReadExactAsync(stream, 2, token);
+            ushort payloadLen = (ushort)(lenBytes[0] | (lenBytes[1] << 8));
+            if (payloadLen == 0)
+                throw new IOException("Invalid payload length");
 
-            var payloadCrc = await ReadExactAsync(stream, payloadLen + 2, token);
+            // читаем тело + CRC
+            var payloadWithCrc = await ReadExactAsync(stream, payloadLen + 2, token);
+
             var payload = new byte[payloadLen];
-            Buffer.BlockCopy(payloadCrc, 0, payload, 0, payloadLen);
+            Buffer.BlockCopy(payloadWithCrc, 0, payload, 0, payloadLen);
 
-            ushort expectedCrc = ComputeCrc16(payload);
-            ushort actualCrc = (ushort)(payloadCrc[payloadLen] | (payloadCrc[payloadLen + 1] << 8));
-            if (expectedCrc != actualCrc)
+            ushort receivedCrc = (ushort)(payloadWithCrc[payloadLen] | (payloadWithCrc[payloadLen + 1] << 8));
+            ushort computedCrc = ComputeCrc16(payload);
+
+            if (receivedCrc != computedCrc)
                 throw new IOException("CRC mismatch");
 
             return payload;
+        }
+
+        private async Task<byte[]> ReadExactAsync(Stream stream, int count, CancellationToken token)
+        {
+            var buffer = new byte[count];
+            int offset = 0;
+
+            while (offset < count)
+            {
+                int read = await stream.ReadAsync(buffer, offset, count - offset, token);
+                if (read == 0)
+                    throw new IOException("Connection closed");
+                offset += read;
+            }
+
+            return buffer;
         }
 
         private void ParsePacket(Scale scale, byte[] payload)
@@ -170,6 +215,7 @@ namespace MassaKWin.Core
             }
 
             int offset = 1;
+
             int rawMass = BitConverter.ToInt32(payload, offset);
             byte division = payload[offset + 4];
             bool stable = payload[offset + 5] == 1;
@@ -180,7 +226,7 @@ namespace MassaKWin.Core
             double measured = rawMass * factor;
             double tareValue = 0.0;
 
-            if (scale.Protocol == ScaleProtocol.WithTare && payload.Length >= offset + 9 + 4)
+            if (scale.Protocol == ScaleProtocol.WithTare && payload.Length >= offset + 8 + 4)
             {
                 int rawTare = BitConverter.ToInt32(payload, offset + 8);
                 tareValue = rawTare * factor;
@@ -207,45 +253,53 @@ namespace MassaKWin.Core
             };
         }
 
-        private async Task ConnectWithTimeoutAsync(TcpClient client, string host, int port, TimeSpan timeout, CancellationToken token)
+        private async Task ConnectWithTimeoutAsync(
+            TcpClient client,
+            string host,
+            int port,
+            TimeSpan timeout,
+            CancellationToken token)
         {
             var connectTask = client.ConnectAsync(host, port);
             var completed = await Task.WhenAny(connectTask, Task.Delay(timeout, token));
             if (completed != connectTask)
             {
                 client.Close();
-                throw new TimeoutException($"Таймаут подключения к {host}:{port} за {timeout.TotalSeconds:F1} c");
+                throw new TimeoutException();
             }
+
             await connectTask;
         }
 
-        private async Task<byte[]> ReadExactAsync(Stream stream, int count, CancellationToken token)
-        {
-            var buffer = new byte[count];
-            int offset = 0;
-            while (offset < count)
-            {
-                int read = await stream.ReadAsync(buffer, offset, count - offset, token);
-                if (read == 0)
-                    throw new IOException("Connection closed");
-                offset += read;
-            }
-            return buffer;
-        }
-
+        /// <summary>
+        /// CRC16 по алгоритму из мануала Massa-K (начальное значение 0, полином 0x1021).
+        /// </summary>
         private ushort ComputeCrc16(IReadOnlyList<byte> data)
         {
-            ushort crc = 0xFFFF;
-            for (int i = 0; i < data.Count; i++)
+            ushort crc = 0;
+
+            for (int k = 0; k < data.Count; k++)
             {
-                crc ^= (ushort)(data[i] << 8);
-                for (int j = 0; j < 8; j++)
+                ushort a = 0;
+                ushort temp = (ushort)((crc >> 8) << 8);
+
+                for (int bits = 0; bits < 8; bits++)
                 {
-                    crc = (crc & 0x8000) != 0
-                        ? (ushort)((crc << 1) ^ 0x1021)
-                        : (ushort)(crc << 1);
+                    if (((temp ^ a) & 0x8000) != 0)
+                    {
+                        a = (ushort)(((a << 1) ^ 0x1021) & 0xFFFF);
+                    }
+                    else
+                    {
+                        a = (ushort)((a << 1) & 0xFFFF);
+                    }
+
+                    temp = (ushort)((temp << 1) & 0xFFFF);
                 }
+
+                crc = (ushort)(a ^ ((crc << 8) & 0xFFFF) ^ (data[k] & 0xFF));
             }
+
             return crc;
         }
     }

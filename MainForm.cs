@@ -1,10 +1,17 @@
 using System;
 using System.Windows.Forms;
+using MassaKWin.Core;
 
 namespace MassaKWin
 {
     public class MainForm : Form
     {
+        private readonly ScaleManager _scaleManager;
+        private readonly WeightHistoryManager _historyManager;
+        private readonly MassaKClient _massaClient;
+        private readonly TimeSpan _offlineThreshold = TimeSpan.FromSeconds(10);
+        private readonly Timer _uiTimer;
+
         private TabControl tabControl;
         private TabPage tabScales;
         private TabPage tabCameras;
@@ -23,6 +30,32 @@ namespace MassaKWin
             StartPosition = FormStartPosition.CenterScreen;
 
             InitializeComponents();
+
+            _scaleManager = new ScaleManager();
+            _historyManager = new WeightHistoryManager();
+            _scaleManager.OfflineThreshold = _offlineThreshold;
+
+            _scaleManager.AddScale(new Scale { Name = "Scale 1", Ip = "192.168.0.80", Port = 5000 });
+            _scaleManager.AddScale(new Scale { Name = "Scale 2", Ip = "192.168.0.81", Port = 5000 });
+
+            _massaClient = new MassaKClient(
+                _scaleManager.Scales,
+                pollInterval: TimeSpan.FromMilliseconds(200),
+                connectTimeout: TimeSpan.FromSeconds(3),
+                offlineThreshold: _offlineThreshold,
+                reconnectDelay: TimeSpan.FromSeconds(5));
+
+            _massaClient.ScaleUpdated += OnScaleUpdated;
+            _massaClient.Start();
+
+            _uiTimer = new Timer
+            {
+                Interval = 500
+            };
+            _uiTimer.Tick += UiTimerOnTick;
+            _uiTimer.Start();
+
+            FormClosing += OnFormClosing;
         }
 
         private void InitializeComponents()
@@ -120,6 +153,39 @@ namespace MassaKWin
             tabLog.Controls.Add(txtLog);
         }
 
-        // TODO: позже добавить привязку к менеджерам, обработчики двойного клика для открытия трендов и т.д.
+        private void UiTimerOnTick(object sender, EventArgs e)
+        {
+            RefreshScalesGrid();
+        }
+
+        private void RefreshScalesGrid()
+        {
+            dgvScales.Rows.Clear();
+
+            foreach (var scale in _scaleManager.Scales)
+            {
+                string name = scale.Name;
+                string ipPort = $"{scale.Ip}:{scale.Port}";
+                string protocol = scale.Protocol.ToString();
+                string netKg = (scale.State.NetGrams / 1000.0).ToString("F3");
+                string tareKg = (scale.State.TareGrams / 1000.0).ToString("F3");
+                string stable = scale.State.Stable ? "Да" : "Нет";
+                string online = scale.State.IsOnline(_offlineThreshold) ? "Да" : "Нет";
+
+                dgvScales.Rows.Add(name, ipPort, protocol, netKg, tareKg, stable, online);
+            }
+        }
+
+        private void OnScaleUpdated(Scale scale)
+        {
+            _historyManager.AddSample(scale);
+            BeginInvoke(new Action(RefreshScalesGrid));
+        }
+
+        private void OnFormClosing(object sender, FormClosingEventArgs e)
+        {
+            _uiTimer.Stop();
+            _massaClient.StopAsync().GetAwaiter().GetResult();
+        }
     }
 }

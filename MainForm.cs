@@ -1,6 +1,7 @@
 using System;
 using System.Windows.Forms;
 using MassaKWin.Core;
+using Timer = System.Windows.Forms.Timer;
 
 namespace MassaKWin
 {
@@ -36,7 +37,7 @@ namespace MassaKWin
             _scaleManager.OfflineThreshold = _offlineThreshold;
 
             _scaleManager.AddScale(new Scale { Name = "Scale 1", Ip = "192.168.0.80", Port = 5000 });
-            _scaleManager.AddScale(new Scale { Name = "Scale 2", Ip = "192.168.0.81", Port = 5000 });
+            _scaleManager.AddScale(new Scale { Name = "Scale 2", Ip = "192.168.0.81", Port = 5001 });
 
             _massaClient = new MassaKClient(
                 _scaleManager.Scales,

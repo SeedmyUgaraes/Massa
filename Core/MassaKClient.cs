@@ -23,6 +23,7 @@ namespace MassaKWin.Core
         private readonly Dictionary<Guid, CancellationTokenSource> _tokens = new();
 
         public event Action<Scale>? ScaleUpdated;
+        public event Action<string>? LogMessage;
 
         public MassaKClient(
             IList<Scale> scales,
@@ -91,8 +92,10 @@ namespace MassaKWin.Core
                 {
                     break;
                 }
-                catch
+                catch (Exception ex)
                 {
+                    LogMessage?.Invoke(
+                        $"[{DateTime.Now:HH:mm:ss}] {scale.Name} {scale.Ip}:{scale.Port} {ex.GetType().Name}: {ex.Message}");
                 }
                 finally
                 {
@@ -211,7 +214,7 @@ namespace MassaKWin.Core
             if (completed != connectTask)
             {
                 client.Close();
-                throw new TimeoutException();
+                throw new TimeoutException($"Таймаут подключения к {host}:{port} за {timeout.TotalSeconds:F1} c");
             }
             await connectTask;
         }

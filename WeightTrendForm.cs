@@ -11,10 +11,10 @@ namespace MassaKWin
     {
         private readonly Scale _scale;
         private readonly WeightHistoryManager _historyManager;
-        private Chart _chart;
-        private ComboBox _intervalComboBox;
-        private CheckBox _autoUpdateCheckBox;
-        private Timer _timer;
+        private Chart _chart = null!;
+        private ComboBox _intervalComboBox = null!;
+        private CheckBox _autoUpdateCheckBox = null!;
+        private Timer _timer = null!;
 
         public WeightTrendForm(Scale scale, WeightHistoryManager historyManager)
         {
@@ -22,6 +22,7 @@ namespace MassaKWin
             _historyManager = historyManager ?? throw new ArgumentNullException(nameof(historyManager));
 
             InitializeComponent();
+            Text = $"Тренд: {_scale.Name}";
         }
 
         private void InitializeComponent()
@@ -33,29 +34,27 @@ namespace MassaKWin
 
             SuspendLayout();
 
-            Text = "Тренд веса";
-            Width = 800;
+            Width = 900;
             Height = 600;
 
-            var controlsPanel = new Panel
+            var controlsPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
                 Height = 40,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Padding = new Padding(10, 8, 10, 8)
             };
 
             _intervalComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
-            _intervalComboBox.Items.AddRange(new object[] { "5 минут", "10 минут", "30 минут", "60 минут" });
-            _intervalComboBox.SelectedIndex = 1;
-            _intervalComboBox.Width = 120;
-            _intervalComboBox.Location = new System.Drawing.Point(10, 10);
+            _intervalComboBox.Items.AddRange(new object[] { "5 мин", "10 мин", "30 мин", "Вся история" });
             _intervalComboBox.SelectedIndexChanged += IntervalComboBox_SelectedIndexChanged;
+            _intervalComboBox.Width = 120;
+            controlsPanel.Controls.Add(_intervalComboBox);
 
             _autoUpdateCheckBox.Text = "Автообновление";
             _autoUpdateCheckBox.AutoSize = true;
-            _autoUpdateCheckBox.Location = new System.Drawing.Point(150, 12);
             _autoUpdateCheckBox.CheckedChanged += AutoUpdateCheckBox_CheckedChanged;
-
-            controlsPanel.Controls.Add(_intervalComboBox);
             controlsPanel.Controls.Add(_autoUpdateCheckBox);
 
             var chartArea = new ChartArea("Default");
@@ -63,24 +62,40 @@ namespace MassaKWin
             chartArea.AxisX.IntervalType = DateTimeIntervalType.Auto;
             chartArea.AxisX.Title = "Время";
             chartArea.AxisY.Title = "Масса, кг";
+            chartArea.AxisY2.Enabled = AxisEnabled.True;
+            chartArea.AxisY2.Minimum = 0;
+            chartArea.AxisY2.Maximum = 1.1;
+            chartArea.AxisY2.Title = "Стабильно";
             _chart.ChartAreas.Add(chartArea);
             _chart.Dock = DockStyle.Fill;
+            _chart.Legends.Add(new Legend());
 
             var netSeries = new Series("Net")
             {
                 ChartType = SeriesChartType.Line,
                 XValueType = ChartValueType.DateTime,
                 YValueType = ChartValueType.Double,
+                ChartArea = "Default"
             };
             var tareSeries = new Series("Tare")
             {
                 ChartType = SeriesChartType.Line,
                 XValueType = ChartValueType.DateTime,
                 YValueType = ChartValueType.Double,
+                ChartArea = "Default"
+            };
+            var stableSeries = new Series("Stable")
+            {
+                ChartType = SeriesChartType.Line,
+                XValueType = ChartValueType.DateTime,
+                YValueType = ChartValueType.Double,
+                ChartArea = "Default",
+                YAxisType = AxisType.Secondary
             };
 
             _chart.Series.Add(netSeries);
             _chart.Series.Add(tareSeries);
+            _chart.Series.Add(stableSeries);
 
             _timer.Interval = 1000;
             _timer.Tick += Timer_Tick;
@@ -95,60 +110,68 @@ namespace MassaKWin
 
         private void WeightTrendForm_Load(object? sender, EventArgs e)
         {
+            _intervalComboBox.SelectedItem = "10 мин";
             _autoUpdateCheckBox.Checked = true;
-            RefreshChart();
-            _timer.Enabled = _autoUpdateCheckBox.Checked;
+            UpdateChart();
+            _timer.Start();
+        }
+
+        private void IntervalComboBox_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            UpdateChart();
+        }
+
+        private void AutoUpdateCheckBox_CheckedChanged(object? sender, EventArgs e)
+        {
+            if (_autoUpdateCheckBox.Checked)
+            {
+                UpdateChart();
+            }
         }
 
         private void Timer_Tick(object? sender, EventArgs e)
         {
             if (_autoUpdateCheckBox.Checked)
             {
-                RefreshChart();
+                UpdateChart();
             }
         }
 
-        private void IntervalComboBox_SelectedIndexChanged(object? sender, EventArgs e)
-        {
-            RefreshChart();
-        }
-
-        private void AutoUpdateCheckBox_CheckedChanged(object? sender, EventArgs e)
-        {
-            _timer.Enabled = _autoUpdateCheckBox.Checked;
-            if (_timer.Enabled)
-            {
-                RefreshChart();
-            }
-        }
-
-        private TimeSpan GetSelectedWindow()
+        private TimeSpan? GetSelectedWindow()
         {
             return _intervalComboBox.SelectedItem?.ToString() switch
             {
-                "5 минут" => TimeSpan.FromMinutes(5),
-                "10 минут" => TimeSpan.FromMinutes(10),
-                "30 минут" => TimeSpan.FromMinutes(30),
-                "60 минут" => TimeSpan.FromMinutes(60),
-                _ => TimeSpan.FromMinutes(10),
+                "5 мин" => TimeSpan.FromMinutes(5),
+                "10 мин" => TimeSpan.FromMinutes(10),
+                "30 мин" => TimeSpan.FromMinutes(30),
+                "Вся история" => null,
+                _ => TimeSpan.FromMinutes(10)
             };
         }
 
-        private void RefreshChart()
+        private void UpdateChart()
         {
             var window = GetSelectedWindow();
-            var samples = _historyManager.GetSamples(_scale.Id, window).OrderBy(s => s.TimestampUtc).ToList();
+            var samples = window.HasValue
+                ? _historyManager.GetSamples(_scale.Id, window.Value)
+                : _historyManager.GetSamples(_scale.Id, _historyManager.HistoryDepth);
+
+            var ordered = samples.OrderBy(s => s.TimestampUtc).ToList();
 
             var netSeries = _chart.Series["Net"];
             var tareSeries = _chart.Series["Tare"];
+            var stableSeries = _chart.Series["Stable"];
+
             netSeries.Points.Clear();
             tareSeries.Points.Clear();
+            stableSeries.Points.Clear();
 
-            foreach (var sample in samples)
+            foreach (var sample in ordered)
             {
                 var time = sample.TimestampUtc.ToLocalTime();
                 netSeries.Points.AddXY(time, sample.NetGrams / 1000.0);
                 tareSeries.Points.AddXY(time, sample.TareGrams / 1000.0);
+                stableSeries.Points.AddXY(time, sample.Stable ? 1 : 0);
             }
         }
     }

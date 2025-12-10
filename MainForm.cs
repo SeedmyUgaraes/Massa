@@ -10,6 +10,8 @@ namespace MassaKWin
         private readonly ScaleManager _scaleManager;
         private readonly WeightHistoryManager _historyManager;
         private readonly MassaKClient _massaClient;
+        private CameraManager _cameraManager;
+        private CameraOsdService? _cameraOsdService;
         private readonly TimeSpan _offlineThreshold = TimeSpan.FromSeconds(10);
         private readonly Timer _uiTimer;
 
@@ -49,6 +51,44 @@ namespace MassaKWin
             _massaClient.LogMessage += AppendLog;
             _massaClient.ScaleUpdated += OnScaleUpdated;
             _massaClient.Start();
+
+            _cameraManager = new CameraManager();
+
+            var cam1 = new Camera
+            {
+                Name = "Cam 1",
+                Ip = "192.168.0.90",
+                Port = 80,
+                Username = "admin",
+                Password = "12345",
+                BasePosX = 100,
+                BasePosY = 100,
+                LineHeight = 40
+            };
+
+            int overlayId = 1;
+            foreach (var scale in _scaleManager.Scales)
+            {
+                cam1.Bindings.Add(new CameraScaleBinding
+                {
+                    Camera = cam1,
+                    Scale = scale,
+                    OverlayId = overlayId++,
+                    AutoPosition = true,
+                    Enabled = true
+                });
+            }
+
+            _cameraManager.Cameras.Add(cam1);
+
+            _cameraOsdService = new CameraOsdService(
+                _cameraManager.Cameras,
+                _scaleManager,
+                TimeSpan.FromMilliseconds(100));
+
+            _cameraOsdService.LogMessage += AppendLog;
+
+            _cameraOsdService.Start();
 
             _uiTimer = new Timer
             {
@@ -123,10 +163,9 @@ namespace MassaKWin
             };
 
             dgvCameras.Columns.Add("Name", "Имя камеры");
-            dgvCameras.Columns.Add("Ip", "IP");
-            dgvCameras.Columns.Add("OverlayInfo", "Привязанные весы / OSD");
-
-            // TODO: привязать к CameraManager и отрисовывать конфигурацию
+            dgvCameras.Columns.Add("IpPort", "IP:Port");
+            dgvCameras.Columns.Add("Bindings", "Привязок весов");
+            dgvCameras.Columns.Add("OsdStatus", "Статус OSD");
 
             tabCameras.Controls.Add(dgvCameras);
         }
@@ -158,6 +197,7 @@ namespace MassaKWin
         private void UiTimerOnTick(object sender, EventArgs e)
         {
             RefreshScalesGrid();
+            RefreshCamerasGrid();
         }
 
         private void RefreshScalesGrid()
@@ -184,6 +224,31 @@ namespace MassaKWin
             BeginInvoke(new Action(RefreshScalesGrid));
         }
 
+        private void RefreshCamerasGrid()
+        {
+            if (_cameraManager == null) return;
+
+            dgvCameras.Rows.Clear();
+
+            foreach (var cam in _cameraManager.Cameras)
+            {
+                var ipPort = $"{cam.Ip}:{cam.Port}";
+                var bindingsCount = cam.Bindings?.Count ?? 0;
+                string? status = null;
+
+                if (_cameraOsdService != null)
+                {
+                    status = _cameraOsdService.GetCameraStatus(cam.Id);
+                }
+
+                dgvCameras.Rows.Add(
+                    cam.Name,
+                    ipPort,
+                    bindingsCount,
+                    status ?? string.Empty);
+            }
+        }
+
         private void AppendLog(string message)
         {
             BeginInvoke(new Action(() =>
@@ -196,6 +261,11 @@ namespace MassaKWin
         {
             _uiTimer.Stop();
             _massaClient.StopAsync().GetAwaiter().GetResult();
+            if (_cameraOsdService != null)
+            {
+                _cameraOsdService.StopAsync().GetAwaiter().GetResult();
+                _cameraOsdService = null;
+            }
         }
     }
 }

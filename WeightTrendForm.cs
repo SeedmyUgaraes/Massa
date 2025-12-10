@@ -11,10 +11,10 @@ namespace MassaKWin
     {
         private readonly Scale _scale;
         private readonly WeightHistoryManager _historyManager;
-        private readonly Chart _chart;
-        private readonly ComboBox _intervalComboBox;
-        private readonly CheckBox _autoUpdateCheckBox;
-        private readonly Timer _timer;
+        private Chart _chart;
+        private ComboBox _intervalComboBox;
+        private CheckBox _autoUpdateCheckBox;
+        private Timer _timer;
 
         public WeightTrendForm(Scale scale, WeightHistoryManager historyManager)
         {

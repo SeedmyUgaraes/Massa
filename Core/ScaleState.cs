@@ -13,6 +13,7 @@ namespace MassaKWin.Core
 
         public bool IsOnline(TimeSpan offlineThreshold)
         {
+            // Определяем онлайн состояние по давности последнего обновления
             if (LastUpdateUtc == default)
                 return false;
 

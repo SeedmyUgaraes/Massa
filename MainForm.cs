@@ -98,6 +98,8 @@ namespace MassaKWin
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect
             };
 
+            dgvScales.CellDoubleClick += DgvScales_CellDoubleClick;
+
             dgvScales.Columns.Add("Name", "Имя");
             dgvScales.Columns.Add("IpPort", "IP:Port");
             dgvScales.Columns.Add("Protocol", "Протокол");
@@ -244,6 +246,17 @@ namespace MassaKWin
 
                 dgvScales.Rows.Add(name, ipPort, protocol, netKg, tareKg, stable, onlineText, statusText);
             }
+        }
+
+        private void DgvScales_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= _scaleManager.Scales.Count)
+                return;
+
+            var scale = _scaleManager.Scales[e.RowIndex];
+
+            var trend = new WeightTrendForm(scale, _historyManager);
+            trend.Show(this);
         }
 
         private void OnScaleUpdated(Scale scale)

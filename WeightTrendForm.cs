@@ -3,6 +3,7 @@ using System.Linq;
 using System.Windows.Forms;
 using System.Windows.Forms.DataVisualization.Charting;
 using MassaKWin.Core;
+using Timer = System.Windows.Forms.Timer;
 
 namespace MassaKWin
 {

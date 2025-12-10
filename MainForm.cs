@@ -24,6 +24,8 @@ namespace MassaKWin
         private DataGridView dgvScales;
         private DataGridView dgvCameras;
         private TextBox txtLog;
+        private Button _btnAddScale;
+        private Button _btnAddCamera;
 
         public MainForm()
         {
@@ -38,9 +40,6 @@ namespace MassaKWin
             _historyManager = new WeightHistoryManager();
             _scaleManager.OfflineThreshold = _offlineThreshold;
 
-            _scaleManager.AddScale(new Scale { Name = "Scale 1", Ip = "192.168.0.80", Port = 5000 });
-            _scaleManager.AddScale(new Scale { Name = "Scale 2", Ip = "192.168.0.81", Port = 5001 });
-
             _massaClient = new MassaKClient(
                 _scaleManager.Scales,
                 pollInterval: TimeSpan.FromMilliseconds(200),
@@ -53,33 +52,6 @@ namespace MassaKWin
             _massaClient.Start();
 
             _cameraManager = new CameraManager();
-
-            var cam1 = new Camera
-            {
-                Name = "Cam 1",
-                Ip = "192.168.0.90",
-                Port = 80,
-                Username = "admin",
-                Password = "12345",
-                BasePosX = 100,
-                BasePosY = 100,
-                LineHeight = 40
-            };
-
-            int overlayId = 1;
-            foreach (var scale in _scaleManager.Scales)
-            {
-                cam1.Bindings.Add(new CameraScaleBinding
-                {
-                    Camera = cam1,
-                    Scale = scale,
-                    OverlayId = overlayId++,
-                    AutoPosition = true,
-                    Enabled = true
-                });
-            }
-
-            _cameraManager.Cameras.Add(cam1);
 
             _cameraOsdService = new CameraOsdService(
                 _cameraManager.Cameras,
@@ -147,7 +119,23 @@ namespace MassaKWin
 
             // TODO: привязать к ScaleManager и заполнить источником данных
 
+            _btnAddScale = new Button
+            {
+                Text = "Добавить весы",
+                Dock = DockStyle.Top,
+                Height = 35
+            };
+            _btnAddScale.Click += OnAddScaleClicked;
+
+            var scalesPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 40
+            };
+            scalesPanel.Controls.Add(_btnAddScale);
+
             tabScales.Controls.Add(dgvScales);
+            tabScales.Controls.Add(scalesPanel);
         }
 
         private void InitializeCamerasTab()
@@ -167,7 +155,23 @@ namespace MassaKWin
             dgvCameras.Columns.Add("Bindings", "Привязок весов");
             dgvCameras.Columns.Add("OsdStatus", "Статус OSD");
 
+            _btnAddCamera = new Button
+            {
+                Text = "Добавить камеру",
+                Dock = DockStyle.Top,
+                Height = 35
+            };
+            _btnAddCamera.Click += OnAddCameraClicked;
+
+            var camerasPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 40
+            };
+            camerasPanel.Controls.Add(_btnAddCamera);
+
             tabCameras.Controls.Add(dgvCameras);
+            tabCameras.Controls.Add(camerasPanel);
         }
 
         private void InitializeSettingsTab()
@@ -246,6 +250,48 @@ namespace MassaKWin
                     ipPort,
                     bindingsCount,
                     status ?? string.Empty);
+            }
+        }
+
+        private void OnAddScaleClicked(object? sender, EventArgs e)
+        {
+            using (var dlg = new ScaleEditForm())
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    var scale = dlg.Scale;
+                    _scaleManager.Scales.Add(scale);
+                    _massaClient?.Start();
+                    RefreshScalesGrid();
+                }
+            }
+        }
+
+        private void OnAddCameraClicked(object? sender, EventArgs e)
+        {
+            using (var dlg = new CameraEditForm())
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    var cam = dlg.Camera;
+
+                    int overlayId = 1;
+                    foreach (var scale in _scaleManager.Scales)
+                    {
+                        cam.Bindings.Add(new CameraScaleBinding
+                        {
+                            Camera = cam,
+                            Scale = scale,
+                            OverlayId = overlayId++,
+                            AutoPosition = true,
+                            Enabled = true
+                        });
+                    }
+
+                    _cameraManager.Cameras.Add(cam);
+                    _cameraOsdService?.Start();
+                    RefreshCamerasGrid();
+                }
             }
         }
 

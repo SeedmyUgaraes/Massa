@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using MassaKWin.Core;
 using Timer = System.Windows.Forms.Timer;
@@ -51,7 +52,7 @@ namespace MassaKWin
 
             _configStorage = new ConfigStorage();
 
-            LoadConfig();
+            _ = LoadConfigAsync();
 
             _uiTimer = new Timer
             {
@@ -59,8 +60,6 @@ namespace MassaKWin
             };
             _uiTimer.Tick += UiTimerOnTick;
             _uiTimer.Start();
-
-            FormClosing += OnFormClosing;
         }
 
         private void InitializeComponents()
@@ -292,7 +291,7 @@ namespace MassaKWin
             }
         }
 
-        private void OnAddScaleClicked(object? sender, EventArgs e)
+        private async void OnAddScaleClicked(object? sender, EventArgs e)
         {
             using (var dlg = new ScaleEditForm())
             {
@@ -300,16 +299,16 @@ namespace MassaKWin
                 {
                     var scale = dlg.Scale;
                     _scaleManager.Scales.Add(scale);
-                    RecreateScaleClient();
-                    RecreateCameraOsdService();
+                    SaveConfig();
+                    await RecreateScaleClientAsync();
+                    await RecreateCameraOsdServiceAsync();
                     RefreshScalesGrid();
                     RefreshCamerasGrid();
-                    SaveConfig();
                 }
             }
         }
 
-        private void OnAddCameraClicked(object? sender, EventArgs e)
+        private async void OnAddCameraClicked(object? sender, EventArgs e)
         {
             using (var dlg = new CameraEditForm())
             {
@@ -331,14 +330,14 @@ namespace MassaKWin
                     }
 
                     _cameraManager.Cameras.Add(cam);
-                    RecreateCameraOsdService();
-                    RefreshCamerasGrid();
                     SaveConfig();
+                    await RecreateCameraOsdServiceAsync();
+                    RefreshCamerasGrid();
                 }
             }
         }
 
-        private void OnEditBindingsClicked(object? sender, EventArgs e)
+        private async void OnEditBindingsClicked(object? sender, EventArgs e)
         {
             if (dgvCameras.CurrentRow == null) return;
             int rowIndex = dgvCameras.CurrentRow.Index;
@@ -350,14 +349,14 @@ namespace MassaKWin
             {
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
-                    RecreateCameraOsdService();
-                    RefreshCamerasGrid();
                     SaveConfig();
+                    await RecreateCameraOsdServiceAsync();
+                    RefreshCamerasGrid();
                 }
             }
         }
 
-        private void OnDeleteScaleClicked(object? sender, EventArgs e)
+        private async void OnDeleteScaleClicked(object? sender, EventArgs e)
         {
             if (dgvScales.CurrentRow == null) return;
             int rowIndex = dgvScales.CurrentRow.Index;
@@ -385,15 +384,15 @@ namespace MassaKWin
 
             _scaleManager.Scales.Remove(scale);
 
-            RecreateScaleClient();
-            RecreateCameraOsdService();
+            SaveConfig();
+            await RecreateScaleClientAsync();
+            await RecreateCameraOsdServiceAsync();
 
             RefreshScalesGrid();
             RefreshCamerasGrid();
-            SaveConfig();
         }
 
-        private void OnDeleteCameraClicked(object? sender, EventArgs e)
+        private async void OnDeleteCameraClicked(object? sender, EventArgs e)
         {
             if (dgvCameras.CurrentRow == null) return;
             int rowIndex = dgvCameras.CurrentRow.Index;
@@ -412,20 +411,20 @@ namespace MassaKWin
 
             _cameraManager.Cameras.Remove(cam);
 
-            RecreateCameraOsdService();
-            RefreshCamerasGrid();
             SaveConfig();
+            await RecreateCameraOsdServiceAsync();
+            RefreshCamerasGrid();
         }
 
-        private void LoadConfig()
+        private async Task LoadConfigAsync()
         {
             try
             {
                 var config = _configStorage.Load();
                 _configStorage.ApplyToManagers(config, _scaleManager, _cameraManager);
 
-                RecreateScaleClient();
-                RecreateCameraOsdService();
+                await RecreateScaleClientAsync();
+                await RecreateCameraOsdServiceAsync();
 
                 RefreshScalesGrid();
                 RefreshCamerasGrid();
@@ -457,9 +456,18 @@ namespace MassaKWin
             }));
         }
 
-        private void RecreateScaleClient()
+        private async Task RecreateScaleClientAsync()
         {
-            _massaClient?.StopAsync().GetAwaiter().GetResult();
+            if (_massaClient != null)
+            {
+                try
+                {
+                    await _massaClient.StopAsync();
+                }
+                catch
+                {
+                }
+            }
 
             _massaClient = new MassaKClient(
                 _scaleManager.Scales,
@@ -473,9 +481,18 @@ namespace MassaKWin
             _massaClient.Start();
         }
 
-        private void RecreateCameraOsdService()
+        private async Task RecreateCameraOsdServiceAsync()
         {
-            _cameraOsdService?.StopAsync().GetAwaiter().GetResult();
+            if (_cameraOsdService != null)
+            {
+                try
+                {
+                    await _cameraOsdService.StopAsync();
+                }
+                catch
+                {
+                }
+            }
 
             _cameraOsdService = new CameraOsdService(
                 _cameraManager.Cameras,
@@ -487,11 +504,17 @@ namespace MassaKWin
             _cameraOsdService.Start();
         }
 
-        private void OnFormClosing(object sender, FormClosingEventArgs e)
+        protected override async void OnFormClosing(FormClosingEventArgs e)
         {
+            base.OnFormClosing(e);
+
             _uiTimer.Stop();
-            _massaClient?.StopAsync().GetAwaiter().GetResult();
-            _cameraOsdService?.StopAsync().GetAwaiter().GetResult();
+            if (_massaClient != null)
+                await _massaClient.StopAsync();
+
+            if (_cameraOsdService != null)
+                await _cameraOsdService.StopAsync();
+
             SaveConfig();
         }
     }

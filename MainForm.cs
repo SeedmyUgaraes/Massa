@@ -9,6 +9,7 @@ namespace MassaKWin
     {
         private readonly ScaleManager _scaleManager;
         private readonly WeightHistoryManager _historyManager;
+        private readonly ConfigStorage _configStorage;
         private MassaKClient? _massaClient;
         private CameraManager _cameraManager;
         private CameraOsdService? _cameraOsdService;
@@ -48,8 +49,9 @@ namespace MassaKWin
 
             _cameraManager = new CameraManager();
 
-            RecreateScaleClient();
-            RecreateCameraOsdService();
+            _configStorage = new ConfigStorage();
+
+            LoadConfig();
 
             _uiTimer = new Timer
             {
@@ -302,6 +304,7 @@ namespace MassaKWin
                     RecreateCameraOsdService();
                     RefreshScalesGrid();
                     RefreshCamerasGrid();
+                    SaveConfig();
                 }
             }
         }
@@ -330,6 +333,7 @@ namespace MassaKWin
                     _cameraManager.Cameras.Add(cam);
                     RecreateCameraOsdService();
                     RefreshCamerasGrid();
+                    SaveConfig();
                 }
             }
         }
@@ -348,6 +352,7 @@ namespace MassaKWin
                 {
                     RecreateCameraOsdService();
                     RefreshCamerasGrid();
+                    SaveConfig();
                 }
             }
         }
@@ -385,6 +390,7 @@ namespace MassaKWin
 
             RefreshScalesGrid();
             RefreshCamerasGrid();
+            SaveConfig();
         }
 
         private void OnDeleteCameraClicked(object? sender, EventArgs e)
@@ -408,6 +414,39 @@ namespace MassaKWin
 
             RecreateCameraOsdService();
             RefreshCamerasGrid();
+            SaveConfig();
+        }
+
+        private void LoadConfig()
+        {
+            try
+            {
+                var config = _configStorage.Load();
+                _configStorage.ApplyToManagers(config, _scaleManager, _cameraManager);
+
+                RecreateScaleClient();
+                RecreateCameraOsdService();
+
+                RefreshScalesGrid();
+                RefreshCamerasGrid();
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[{DateTime.Now:HH:mm:ss}] Ошибка загрузки конфигурации: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        private void SaveConfig()
+        {
+            try
+            {
+                var config = _configStorage.CreateFromManagers(_scaleManager, _cameraManager);
+                _configStorage.Save(config);
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[{DateTime.Now:HH:mm:ss}] Ошибка сохранения конфигурации: {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         private void AppendLog(string message)
@@ -453,6 +492,7 @@ namespace MassaKWin
             _uiTimer.Stop();
             _massaClient?.StopAsync().GetAwaiter().GetResult();
             _cameraOsdService?.StopAsync().GetAwaiter().GetResult();
+            SaveConfig();
         }
     }
 }

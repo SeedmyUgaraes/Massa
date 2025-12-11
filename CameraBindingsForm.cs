@@ -10,8 +10,8 @@ namespace MassaKWin
         private readonly Camera _camera;
         private readonly ScaleManager _scaleManager;
         private DataGridView _dgvBindings = null!;
-        private Button _okButton = null!;
-        private Button _cancelButton = null!;
+        private Button _btnOk = null!;
+        private Button _btnCancel = null!;
 
         public CameraBindingsForm(Camera camera, ScaleManager scaleManager)
         {
@@ -39,14 +39,30 @@ namespace MassaKWin
             }
         }
 
-        private void OkButton_Click(object? sender, EventArgs e)
+        private void OnOkClicked(object? sender, EventArgs e)
         {
             _camera.Bindings.Clear();
             var overlayCounter = 1;
 
             foreach (DataGridViewRow row in _dgvBindings.Rows)
             {
-                if (row.Tag is not Scale scale)
+                Scale? scale = null;
+
+                if (row.Tag is Scale tagScale)
+                {
+                    scale = tagScale;
+                }
+
+                if (scale == null)
+                {
+                    var scaleIdValue = row.Cells.Contains("ScaleId") ? row.Cells["ScaleId"].Value : null;
+                    if (scaleIdValue != null && Guid.TryParse(scaleIdValue.ToString(), out var scaleId))
+                    {
+                        scale = _scaleManager.Scales.FirstOrDefault(s => s.Id == scaleId);
+                    }
+                }
+
+                if (scale == null)
                 {
                     continue;
                 }
@@ -69,9 +85,12 @@ namespace MassaKWin
                 if (overlayId <= 0)
                 {
                     overlayId = overlayCounter;
+                    overlayCounter++;
                 }
-
-                overlayCounter = Math.Max(overlayCounter, overlayId + 1);
+                else
+                {
+                    overlayCounter = Math.Max(overlayCounter, overlayId + 1);
+                }
 
                 _camera.Bindings.Add(new CameraScaleBinding
                 {
@@ -79,7 +98,9 @@ namespace MassaKWin
                     Scale = scale,
                     OverlayId = overlayId,
                     AutoPosition = true,
-                    Enabled = true
+                    Enabled = true,
+                    PositionX = 0,
+                    PositionY = 0
                 });
             }
 
@@ -87,7 +108,7 @@ namespace MassaKWin
             Close();
         }
 
-        private void CancelButton_Click(object? sender, EventArgs e)
+        private void OnCancelClicked(object? sender, EventArgs e)
         {
             DialogResult = DialogResult.Cancel;
             Close();
@@ -96,8 +117,8 @@ namespace MassaKWin
         private void InitializeComponent()
         {
             _dgvBindings = new DataGridView();
-            _okButton = new Button();
-            _cancelButton = new Button();
+            _btnOk = new Button();
+            _btnCancel = new Button();
             var buttonsPanel = new Panel();
 
             SuspendLayout();
@@ -144,23 +165,21 @@ namespace MassaKWin
             buttonsPanel.Height = 50;
             buttonsPanel.Padding = new Padding(10);
 
-            _okButton.Text = "ОК";
-            _okButton.DialogResult = DialogResult.OK;
-            _okButton.Anchor = AnchorStyles.Right | AnchorStyles.Top;
-            _okButton.Location = new System.Drawing.Point(300, 10);
-            _okButton.Click += OkButton_Click;
+            _btnOk.Text = "Сохранить";
+            _btnOk.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+            _btnOk.Location = new System.Drawing.Point(300, 10);
+            _btnOk.Click += OnOkClicked;
 
-            _cancelButton.Text = "Отмена";
-            _cancelButton.DialogResult = DialogResult.Cancel;
-            _cancelButton.Anchor = AnchorStyles.Right | AnchorStyles.Top;
-            _cancelButton.Location = new System.Drawing.Point(400, 10);
-            _cancelButton.Click += CancelButton_Click;
+            _btnCancel.Text = "Отмена";
+            _btnCancel.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+            _btnCancel.Location = new System.Drawing.Point(400, 10);
+            _btnCancel.Click += OnCancelClicked;
 
-            buttonsPanel.Controls.Add(_okButton);
-            buttonsPanel.Controls.Add(_cancelButton);
+            buttonsPanel.Controls.Add(_btnOk);
+            buttonsPanel.Controls.Add(_btnCancel);
 
-            AcceptButton = _okButton;
-            CancelButton = _cancelButton;
+            AcceptButton = _btnOk;
+            CancelButton = _btnCancel;
 
             Controls.Add(_dgvBindings);
             Controls.Add(buttonsPanel);

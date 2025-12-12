@@ -244,16 +244,20 @@ namespace MassaKWin
                     ? $"Online {age:hh\\:mm\\:ss}"
                     : $"Offline {age:hh\\:mm\\:ss}";
 
-                dgvScales.Rows.Add(name, ipPort, protocol, netKg, tareKg, stable, onlineText, statusText);
+                var rowIndex = dgvScales.Rows.Add(name, ipPort, protocol, netKg, tareKg, stable, onlineText, statusText);
+                var row = dgvScales.Rows[rowIndex];
+                row.Tag = scale;
             }
         }
 
         private void DgvScales_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)
         {
-            if (e.RowIndex < 0 || e.RowIndex >= _scaleManager.Scales.Count)
+            if (e.RowIndex < 0)
                 return;
 
-            var scale = _scaleManager.Scales[e.RowIndex];
+            var row = dgvScales.Rows[e.RowIndex];
+            if (row?.Tag is not Scale scale)
+                return;
 
             var trend = new WeightTrendForm(scale, _historyManager);
             trend.Show(this);

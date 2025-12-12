@@ -11,6 +11,9 @@
     <Compile Update="MainForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="ScaleDiscoveryForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="ScaleEditForm.cs">
       <SubType>Form</SubType>
     </Compile>

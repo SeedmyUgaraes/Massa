@@ -27,7 +27,8 @@ namespace MassaKWin
         private bool _hasChanges;
 
         private const int ProbePort = 5000;
-        private const int ConnectTimeoutMs = 800;
+        private const int ConnectTimeoutMs = 2000;
+        private const int CommandTimeoutMs = 2000;
 
         public ScaleDiscoveryForm(ScaleManager scaleManager)
         {

@@ -34,6 +34,29 @@ namespace MassaKWin
         private Button _btnAddCamera;
         private Button _btnDeleteCamera;
         private Button _btnEditBindings;
+        private async void OnAddScaleClicked(object? sender, EventArgs e)
+        {
+            // Окно добавления/редактирования весов
+            using (var dlg = new ScaleEditForm())
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK)
+                    return;
+
+                var scale = dlg.Scale;
+                _scaleManager.Scales.Add(scale);
+            }
+
+            // Сохраняем конфигурацию
+            SaveConfig();
+
+            // Асинхронно пересоздаём клиента весов и OSD-сервис камер
+            await RecreateScaleClientAsync();
+            await RecreateCameraOsdServiceAsync();
+
+            // Обновляем таблицы
+            RefreshScalesGrid();
+            RefreshCamerasGrid();
+        }
 
         public MainForm()
         {
@@ -226,26 +249,108 @@ namespace MassaKWin
 
         private void RefreshScalesGrid()
         {
-            dgvScales.Rows.Clear();
-
-            var now = DateTime.UtcNow;
-
-            foreach (var scale in _scaleManager.Scales)
+            if (InvokeRequired)
             {
-                string name = scale.Name;
-                string ipPort = $"{scale.Ip}:{scale.Port}";
-                string protocol = scale.Protocol.ToString();
-                string netKg = (scale.State.NetGrams / 1000.0).ToString("F3");
-                string tareKg = (scale.State.TareGrams / 1000.0).ToString("F3");
-                string stable = scale.State.Stable ? "Да" : "Нет";
-                var age = now - scale.State.LastUpdateUtc;
-                bool online = scale.State.IsOnline(_offlineThreshold);
-                string onlineText = online ? "Да" : "Нет";
-                string statusText = online
-                    ? $"Online {age:hh\\:mm\\:ss}"
-                    : $"Offline {age:hh\\:mm\\:ss}";
+                BeginInvoke(new Action(RefreshScalesGrid));
+                return;
+            }
 
-                dgvScales.Rows.Add(name, ipPort, protocol, netKg, tareKg, stable, onlineText, statusText);
+            if (_scaleManager == null)
+                return;
+
+            // 1. Запоминаем, какие весы были выбраны
+            Guid? selectedScaleId = null;
+
+            if (dgvScales.CurrentRow != null)
+            {
+                // сначала пробуем взять Scale из Tag
+                if (dgvScales.CurrentRow.Tag is Scale tagScale)
+                {
+                    selectedScaleId = tagScale.Id;
+                }
+                else
+                {
+                    int rowIndex = dgvScales.CurrentRow.Index;
+                    if (rowIndex >= 0 && rowIndex < _scaleManager.Scales.Count)
+                        selectedScaleId = _scaleManager.Scales[rowIndex].Id;
+                }
+            }
+
+            dgvScales.SuspendLayout();
+            try
+            {
+                dgvScales.Rows.Clear();
+
+                foreach (var scale in _scaleManager.Scales)
+                {
+                    var state = scale.State;
+
+                    // граммы -> кг
+                    var netKg = state.NetGrams / 1000.0;
+                    var tareKg = state.TareGrams / 1000.0;
+
+                    var now = DateTime.UtcNow;
+
+                    // онлайн/оффлайн по порогу
+                    bool online = state.IsOnline(_offlineThreshold);
+
+                    // обновляем "момент начала" текущего статуса
+                    state.UpdateStatus(online);
+
+                    // сколько времени в текущем статусе
+                    var statusAge = now - state.StatusSinceUtc;
+                    if (statusAge < TimeSpan.Zero)
+                        statusAge = TimeSpan.Zero;
+
+                    string statusText = online
+                        ? $"Online {statusAge:hh\\:mm\\:ss}"
+                        : $"Offline {statusAge:hh\\:mm\\:ss}";
+
+                    // добавляем строку
+                    int rowIndex = dgvScales.Rows.Add(
+                        scale.Name,                         // Имя весов
+                        $"{scale.Ip}:{scale.Port}",         // IP:Port
+                        scale.Protocol.ToString(),          // Протокол
+                        netKg.ToString("F3"),               // Net, кг
+                        tareKg.ToString("F3"),              // Tare, кг
+                        state.Stable ? "Да" : "Нет",        // Stable
+                        online ? "Да" : "Нет",              // Online
+                        statusText                          // Статус + время
+                    );
+
+                    // сохраняем ссылку на объект веса в Tag
+                    dgvScales.Rows[rowIndex].Tag = scale;
+                }
+            }
+            finally
+            {
+                dgvScales.ResumeLayout();
+            }
+
+            // 2. Восстанавливаем выбор тех же весов
+
+            if (selectedScaleId.HasValue)
+            {
+                for (int i = 0; i < _scaleManager.Scales.Count; i++)
+                {
+                    if (_scaleManager.Scales[i].Id == selectedScaleId.Value)
+                    {
+                        var row = dgvScales.Rows[i];
+                        row.Selected = true;
+                        dgvScales.CurrentCell = row.Cells[0];
+                        dgvScales.FirstDisplayedScrollingRowIndex = Math.Max(0, i);
+                        return;
+                    }
+                }
+            }
+
+            // Если до этого ничего не было выбрано, а строки есть — выделяем первую
+            if (dgvScales.Rows.Count > 0 && dgvScales.CurrentRow == null)
+            {
+                var row = dgvScales.Rows[0];
+                row.Selected = true;
+                dgvScales.CurrentCell = row.Cells[0];
+                dgvScales.FirstDisplayedScrollingRowIndex = 0;
             }
         }
 
@@ -268,45 +373,91 @@ namespace MassaKWin
 
         private void RefreshCamerasGrid()
         {
-            if (_cameraManager == null) return;
-
-            dgvCameras.Rows.Clear();
-
-            foreach (var cam in _cameraManager.Cameras)
+            if (InvokeRequired)
             {
-                var ipPort = $"{cam.Ip}:{cam.Port}";
-                var bindingsCount = cam.Bindings?.Count ?? 0;
-                string? status = null;
+                BeginInvoke(new Action(RefreshCamerasGrid));
+                return;
+            }
 
-                if (_cameraOsdService != null)
+            if (_cameraManager == null)
+                return;
+
+            // 1. Запоминаем, какая камера была выбрана
+            Guid? selectedCameraId = null;
+
+            if (dgvCameras.CurrentRow != null)
+            {
+                // сначала пробуем взять из Tag
+                if (dgvCameras.CurrentRow.Tag is Camera tagCamera)
                 {
-                    status = _cameraOsdService.GetCameraStatus(cam.Id);
+                    selectedCameraId = tagCamera.Id;
                 }
+                else
+                {
+                    int rowIndex = dgvCameras.CurrentRow.Index;
+                    if (rowIndex >= 0 && rowIndex < _cameraManager.Cameras.Count)
+                        selectedCameraId = _cameraManager.Cameras[rowIndex].Id;
+                }
+            }
 
-                dgvCameras.Rows.Add(
-                    cam.Name,
-                    ipPort,
-                    bindingsCount,
-                    status ?? string.Empty);
+            dgvCameras.SuspendLayout();
+            try
+            {
+                dgvCameras.Rows.Clear();
+
+                foreach (var cam in _cameraManager.Cameras)
+                {
+                    var ipPort = $"{cam.Ip}:{cam.Port}";
+                    var bindingsCount = cam.Bindings?.Count ?? 0;
+
+                    string? status = null;
+                    if (_cameraOsdService != null)
+                    {
+                        status = _cameraOsdService.GetCameraStatus(cam.Id);
+                    }
+
+                    int rowIndex = dgvCameras.Rows.Add(
+                        cam.Name,
+                        ipPort,
+                        bindingsCount,
+                        status ?? string.Empty);
+
+                    dgvCameras.Rows[rowIndex].Tag = cam;
+                }
+            }
+            finally
+            {
+                dgvCameras.ResumeLayout();
+            }
+
+            // 2. Восстанавливаем выбор той же камеры
+
+            if (selectedCameraId.HasValue)
+            {
+                for (int i = 0; i < _cameraManager.Cameras.Count; i++)
+                {
+                    if (_cameraManager.Cameras[i].Id == selectedCameraId.Value)
+                    {
+                        var row = dgvCameras.Rows[i];
+                        row.Selected = true;
+                        dgvCameras.CurrentCell = row.Cells[0];
+                        dgvCameras.FirstDisplayedScrollingRowIndex = Math.Max(0, i);
+                        return;
+                    }
+                }
+            }
+
+            // Если камеры есть, но выбор не восстановили (например, раньше ничего не было выбрано) —
+            // только тогда выделяем первую строку.
+            if (dgvCameras.Rows.Count > 0 && dgvCameras.CurrentRow == null)
+            {
+                var row = dgvCameras.Rows[0];
+                row.Selected = true;
+                dgvCameras.CurrentCell = row.Cells[0];
+                dgvCameras.FirstDisplayedScrollingRowIndex = 0;
             }
         }
 
-        private async void OnAddScaleClicked(object? sender, EventArgs e)
-        {
-            using (var dlg = new ScaleEditForm())
-            {
-                if (dlg.ShowDialog(this) == DialogResult.OK)
-                {
-                    var scale = dlg.Scale;
-                    _scaleManager.Scales.Add(scale);
-                    SaveConfig();
-                    await RecreateScaleClientAsync();
-                    await RecreateCameraOsdServiceAsync();
-                    RefreshScalesGrid();
-                    RefreshCamerasGrid();
-                }
-            }
-        }
 
         private async void OnAddCameraClicked(object? sender, EventArgs e)
         {

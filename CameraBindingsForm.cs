@@ -28,14 +28,19 @@ namespace MassaKWin
 
             foreach (var scale in _scaleManager.Scales)
             {
-                var existingBinding = _camera.Bindings.FirstOrDefault(b => b.Scale?.Id == scale.Id);
+                var existingBinding = _camera
+                    .Bindings
+                    .FirstOrDefault(b => b.Scale?.Id == scale.Id);
+
                 var rowIndex = _dgvBindings.Rows.Add(
-                    existingBinding?.Enabled ?? false,
-                    scale.Name,
-                    existingBinding?.OverlayId > 0 ? existingBinding?.OverlayId : null
+                    existingBinding?.Enabled ?? false,                        // Enabled
+                    scale.Name,                                               // Имя весов
+                    existingBinding != null && existingBinding.OverlayId > 0  // OverlayId
+                        ? existingBinding.OverlayId
+                        : null
                 );
 
-                _dgvBindings.Rows[rowIndex].Tag = scale;
+                _dgvBindings.Rows[rowIndex].Tag = scale; // чтобы потом знать, к каким весам относится строка
             }
         }
 
@@ -46,41 +51,18 @@ namespace MassaKWin
 
             foreach (DataGridViewRow row in _dgvBindings.Rows)
             {
-                Scale? scale = null;
-
-                if (row.Tag is Scale tagScale)
-                {
-                    scale = tagScale;
-                }
-
-                if (scale == null)
-                {
-                    var scaleIdValue = row.Cells.Contains("ScaleId") ? row.Cells["ScaleId"].Value : null;
-                    if (scaleIdValue != null && Guid.TryParse(scaleIdValue.ToString(), out var scaleId))
-                    {
-                        scale = _scaleManager.Scales.FirstOrDefault(s => s.Id == scaleId);
-                    }
-                }
-
-                if (scale == null)
-                {
+                if (row.Tag is not Scale scale)
                     continue;
-                }
 
                 var enabledValue = row.Cells["Enabled"].Value;
-                var enabled = enabledValue != null && enabledValue is bool boolVal && boolVal;
-
+                var enabled = enabledValue is bool enabledBool && enabledBool;
                 if (!enabled)
-                {
                     continue;
-                }
 
-                var overlayIdValue = row.Cells["OverlayId"].Value?.ToString();
+                var overlayCellValue = row.Cells["OverlayId"].Value?.ToString();
                 int overlayId = 0;
-                if (!string.IsNullOrWhiteSpace(overlayIdValue))
-                {
-                    int.TryParse(overlayIdValue, out overlayId);
-                }
+                if (!string.IsNullOrWhiteSpace(overlayCellValue))
+                    int.TryParse(overlayCellValue, out overlayId);
 
                 if (overlayId <= 0)
                 {
@@ -97,8 +79,8 @@ namespace MassaKWin
                     Camera = _camera,
                     Scale = scale,
                     OverlayId = overlayId,
-                    AutoPosition = true,
                     Enabled = true,
+                    AutoPosition = true,
                     PositionX = 0,
                     PositionY = 0
                 });
@@ -123,6 +105,7 @@ namespace MassaKWin
 
             SuspendLayout();
 
+            // --- Форма ---
             Text = "Привязки весов";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
@@ -130,6 +113,7 @@ namespace MassaKWin
             MinimizeBox = false;
             ClientSize = new System.Drawing.Size(500, 300);
 
+            // --- Таблица ---
             _dgvBindings.AllowUserToAddRows = false;
             _dgvBindings.AllowUserToDeleteRows = false;
             _dgvBindings.RowHeadersVisible = false;
@@ -140,14 +124,14 @@ namespace MassaKWin
             var enabledColumn = new DataGridViewCheckBoxColumn
             {
                 Name = "Enabled",
-                HeaderText = "Enabled",
+                HeaderText = "Вкл.",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.AllCells
             };
 
             var scaleNameColumn = new DataGridViewTextBoxColumn
             {
                 Name = "ScaleName",
-                HeaderText = "ScaleName",
+                HeaderText = "Весы",
                 ReadOnly = true,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill
             };
@@ -161,18 +145,23 @@ namespace MassaKWin
 
             _dgvBindings.Columns.AddRange(enabledColumn, scaleNameColumn, overlayIdColumn);
 
+            // --- Панель с кнопками ---
             buttonsPanel.Dock = DockStyle.Bottom;
             buttonsPanel.Height = 50;
             buttonsPanel.Padding = new Padding(10);
 
+            // Кнопка "Сохранить"
             _btnOk.Text = "Сохранить";
-            _btnOk.Anchor = AnchorStyles.Right | AnchorStyles.Top;
-            _btnOk.Location = new System.Drawing.Point(300, 10);
+            _btnOk.Size = new System.Drawing.Size(90, 23);
+            _btnOk.Location = new System.Drawing.Point(10, 10);
+            _btnOk.Anchor = AnchorStyles.Left | AnchorStyles.Top;
             _btnOk.Click += OnOkClicked;
 
+            // Кнопка "Отмена"
             _btnCancel.Text = "Отмена";
-            _btnCancel.Anchor = AnchorStyles.Right | AnchorStyles.Top;
-            _btnCancel.Location = new System.Drawing.Point(400, 10);
+            _btnCancel.Size = new System.Drawing.Size(90, 23);
+            _btnCancel.Location = new System.Drawing.Point(110, 10);
+            _btnCancel.Anchor = AnchorStyles.Left | AnchorStyles.Top;
             _btnCancel.Click += OnCancelClicked;
 
             buttonsPanel.Controls.Add(_btnOk);
@@ -186,5 +175,6 @@ namespace MassaKWin
 
             ResumeLayout(false);
         }
+
     }
 }

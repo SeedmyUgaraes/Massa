@@ -16,7 +16,7 @@ namespace MassaKWin
         private Button btnOk;
         private Button btnCancel;
 
-        public Scale Scale { get; private set; }
+        public new Scale Scale { get; private set; }
 
         public ScaleEditForm(Scale? scale = null)
         {

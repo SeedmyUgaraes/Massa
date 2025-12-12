@@ -2,7 +2,16 @@
 <Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup />
   <ItemGroup>
+    <Compile Update="CameraBindingsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="CameraEditForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="MainForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="ScaleEditForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Update="WeightTrendForm.cs">

@@ -427,6 +427,27 @@ namespace MassaKWin
         }
 
         /// <summary>
+        /// Чтение одного пакетa протокола Massa-K без проверки CRC.
+        /// F8 55 CE | len(lo,hi) | payload[len] | crc(lo,hi)
+        /// CRC-байты читаем из потока, но не сравниваем.
+        /// </summary>
+        private async Task<byte[]> ReadPacketNoCrcAsync(NetworkStream stream, CancellationToken token)
+        {
+            var header = await ReadExactAsync(stream, 3, token);
+            if (header[0] != 0xF8 || header[1] != 0x55 || header[2] != 0xCE)
+                throw new IOException("Invalid header");
+
+            var lenBuf = await ReadExactAsync(stream, 2, token);
+            int payloadLen = lenBuf[0] | (lenBuf[1] << 8);
+
+            var payloadPlusCrc = await ReadExactAsync(stream, payloadLen + 2, token);
+            var payload = new byte[payloadLen];
+            Buffer.BlockCopy(payloadPlusCrc, 0, payload, 0, payloadLen);
+
+            return payload;
+        }
+
+        /// <summary>
         /// CRC-16-CCITT (0x1021), seed 0xFFFF.
         /// Должен совпадать с тем, что используется в MassaKClient.
         /// </summary>
@@ -480,7 +501,7 @@ namespace MassaKWin
                 await stream.WriteAsync(massaReq, 0, massaReq.Length, linkedCts.Token);
                 await stream.FlushAsync(linkedCts.Token);
 
-                var massaPayload = await ReadPacketAsync(stream, linkedCts.Token);
+                var massaPayload = await ReadPacketNoCrcAsync(stream, linkedCts.Token);
                 if (massaPayload.Length == 0 || massaPayload[0] != 0x24) // CMD_ACK_MASSA
                     return (false, null);
 
@@ -492,12 +513,12 @@ namespace MassaKWin
                     await stream.WriteAsync(nameReq, 0, nameReq.Length, linkedCts.Token);
                     await stream.FlushAsync(linkedCts.Token);
 
-                    var namePayload = await ReadPacketAsync(stream, linkedCts.Token);
-                    if (namePayload.Length == 0 || namePayload[0] != 0x21) // CMD_ACK_NAME
-                        return (true, null); // весы есть, имя не получили
-
-                    if (namePayload.Length <= 5)
+                    var namePayload = await ReadPacketNoCrcAsync(stream, linkedCts.Token);
+                    if (namePayload.Length < 5 || namePayload.Length > 128)
                         return (true, null);
+
+                    if (namePayload[0] != 0x21) // CMD_ACK_NAME
+                        return (true, null); // весы есть, имя не получили
 
                     int nameLen = namePayload.Length - 5; // 1 (cmd) + 4 (ScalesID)
                     var nameBytes = new byte[nameLen];

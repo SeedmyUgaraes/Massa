@@ -31,6 +31,7 @@ namespace MassaKWin
         private TextBox txtLog;
         private Button _btnAddScale;
         private Button _btnDeleteScale;
+        private Button _btnAutoDiscoverScales = null!;
         private Button _btnAddCamera;
         private Button _btnDeleteCamera;
         private Button _btnEditBindings;
@@ -56,6 +57,21 @@ namespace MassaKWin
             // Обновляем таблицы
             RefreshScalesGrid();
             RefreshCamerasGrid();
+        }
+
+        private async void OnAutoDiscoverScalesClicked(object? sender, EventArgs e)
+        {
+            using (var dlg = new ScaleDiscoveryForm(_scaleManager))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    SaveConfig();
+                    await RecreateScaleClientAsync();
+                    await RecreateCameraOsdServiceAsync();
+                    RefreshScalesGrid();
+                    RefreshCamerasGrid();
+                }
+            }
         }
 
         public MainForm()
@@ -150,6 +166,13 @@ namespace MassaKWin
             };
             _btnDeleteScale.Click += OnDeleteScaleClicked;
 
+            _btnAutoDiscoverScales = new Button
+            {
+                Text = "Автопоиск",
+                Height = 35
+            };
+            _btnAutoDiscoverScales.Click += OnAutoDiscoverScalesClicked;
+
             var scalesPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
@@ -159,6 +182,7 @@ namespace MassaKWin
             };
             scalesPanel.Controls.Add(_btnAddScale);
             scalesPanel.Controls.Add(_btnDeleteScale);
+            scalesPanel.Controls.Add(_btnAutoDiscoverScales);
 
             tabScales.Controls.Add(dgvScales);
             tabScales.Controls.Add(scalesPanel);

@@ -27,7 +27,7 @@ namespace MassaKWin
         private bool _hasChanges;
 
         private const int ProbePort = 5000;
-        private const int ConnectTimeoutMs = 400;
+        private const int ConnectTimeoutMs = 800;
 
         public ScaleDiscoveryForm(ScaleManager scaleManager)
         {
@@ -440,6 +440,9 @@ namespace MassaKWin
             var lenBuf = await ReadExactAsync(stream, 2, token);
             int payloadLen = lenBuf[0] | (lenBuf[1] << 8);
 
+            if (payloadLen < 1 || payloadLen > 256)
+                throw new IOException("Invalid payload length");
+
             var payloadPlusCrc = await ReadExactAsync(stream, payloadLen + 2, token);
             var payload = new byte[payloadLen];
             Buffer.BlockCopy(payloadPlusCrc, 0, payload, 0, payloadLen);
@@ -492,28 +495,32 @@ namespace MassaKWin
 
                 var stream = client.GetStream();
 
-                // Для чтения/записи делаем локальный токен с таймаутом
-                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                linkedCts.CancelAfter(timeoutMs);
-
                 // 1. Проверяем, что это вообще наши весы — CMD_GET_MASSA
-                var massaReq = BuildGetMassaRequest();
-                await stream.WriteAsync(massaReq, 0, massaReq.Length, linkedCts.Token);
-                await stream.FlushAsync(linkedCts.Token);
+                using (var massaCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                {
+                    massaCts.CancelAfter(timeoutMs);
 
-                var massaPayload = await ReadPacketNoCrcAsync(stream, linkedCts.Token);
-                if (massaPayload.Length == 0 || massaPayload[0] != 0x24) // CMD_ACK_MASSA
-                    return (false, null);
+                    var massaReq = BuildGetMassaRequest();
+                    await stream.WriteAsync(massaReq, 0, massaReq.Length, massaCts.Token);
+                    await stream.FlushAsync(massaCts.Token);
+
+                    var massaPayload = await ReadPacketNoCrcAsync(stream, massaCts.Token);
+                    if (massaPayload.Length == 0 || (massaPayload[0] != 0x24 && massaPayload[0] != 0x28))
+                        return (false, null);
+                }
 
                 // На этом этапе мы уже точно знаем, что это наши весы
                 // 2. Пробуем прочитать имя, если поддерживается
                 try
                 {
-                    var nameReq = BuildGetNameRequest();
-                    await stream.WriteAsync(nameReq, 0, nameReq.Length, linkedCts.Token);
-                    await stream.FlushAsync(linkedCts.Token);
+                    using var nameCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    nameCts.CancelAfter(timeoutMs);
 
-                    var namePayload = await ReadPacketNoCrcAsync(stream, linkedCts.Token);
+                    var nameReq = BuildGetNameRequest();
+                    await stream.WriteAsync(nameReq, 0, nameReq.Length, nameCts.Token);
+                    await stream.FlushAsync(nameCts.Token);
+
+                    var namePayload = await ReadPacketNoCrcAsync(stream, nameCts.Token);
                     if (namePayload.Length < 5 || namePayload.Length > 128)
                         return (true, null);
 

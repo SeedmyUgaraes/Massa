@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using MassaKWin.Core;
 
@@ -44,19 +47,43 @@ namespace MassaKWin
             }
         }
 
-        private void OnOkClicked(object? sender, EventArgs e)
+        private async void OnOkClicked(object? sender, EventArgs e)
         {
+            var newBindings = BuildBindingsFromGrid();
+            if (newBindings == null)
+                return;
+
+            await ClearCameraOverlaysAsync();
+
             _camera.Bindings.Clear();
+            _camera.Bindings.AddRange(newBindings);
+
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+
+        private List<CameraScaleBinding>? BuildBindingsFromGrid()
+        {
+            var enabledRows = _dgvBindings.Rows
+                .Cast<DataGridViewRow>()
+                .Where(r => r.Tag is Scale)
+                .Where(r => r.Cells["Enabled"].Value is bool enabled && enabled)
+                .ToList();
+
+            if (enabledRows.Count > 4)
+            {
+                MessageBox.Show("Количество включенных привязок не может превышать 4.");
+                return null;
+            }
+
+            var result = new List<CameraScaleBinding>();
+            var usedOverlayIds = new HashSet<int>();
             var overlayCounter = 1;
 
-            foreach (DataGridViewRow row in _dgvBindings.Rows)
+            foreach (var row in enabledRows)
             {
-                if (row.Tag is not Scale scale)
-                    continue;
-
-                var enabledValue = row.Cells["Enabled"].Value;
-                var enabled = enabledValue is bool enabledBool && enabledBool;
-                if (!enabled)
+                var scale = row.Tag as Scale;
+                if (scale == null)
                     continue;
 
                 var overlayCellValue = row.Cells["OverlayId"].Value?.ToString();
@@ -66,15 +93,32 @@ namespace MassaKWin
 
                 if (overlayId <= 0)
                 {
-                    overlayId = overlayCounter;
-                    overlayCounter++;
+                    overlayId = GetNextFreeOverlayId(overlayCounter, usedOverlayIds);
+                    if (overlayId == 0)
+                    {
+                        MessageBox.Show("Не удалось автоматически подобрать OverlayId.");
+                        return null;
+                    }
                 }
-                else
+                else if (overlayId < 1 || overlayId > 4)
                 {
-                    overlayCounter = Math.Max(overlayCounter, overlayId + 1);
+                    MessageBox.Show("OverlayId должен быть от 1 до 4");
+                    return null;
                 }
 
-                _camera.Bindings.Add(new CameraScaleBinding
+                if (usedOverlayIds.Contains(overlayId))
+                {
+                    MessageBox.Show("OverlayId не должен повторяться для включенных привязок.");
+                    return null;
+                }
+
+                usedOverlayIds.Add(overlayId);
+                while (overlayCounter <= 4 && usedOverlayIds.Contains(overlayCounter))
+                {
+                    overlayCounter++;
+                }
+
+                result.Add(new CameraScaleBinding
                 {
                     Camera = _camera,
                     Scale = scale,
@@ -86,8 +130,50 @@ namespace MassaKWin
                 });
             }
 
-            DialogResult = DialogResult.OK;
-            Close();
+            return result;
+        }
+
+        private static int GetNextFreeOverlayId(int startFrom, HashSet<int> usedOverlayIds)
+        {
+            var start = Math.Max(1, startFrom);
+            for (int id = start; id <= 4; id++)
+            {
+                if (!usedOverlayIds.Contains(id))
+                    return id;
+            }
+
+            for (int id = 1; id < start && id <= 4; id++)
+            {
+                if (!usedOverlayIds.Contains(id))
+                    return id;
+            }
+
+            return 0;
+        }
+
+        private async Task ClearCameraOverlaysAsync()
+        {
+            using var client = new HikvisionOsdClient(_camera.Username, _camera.Password);
+
+            for (int overlayId = 1; overlayId <= 4; overlayId++)
+            {
+                try
+                {
+                    await client.ClearOverlayAsync(_camera.Ip, overlayId);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (HttpRequestException ex)
+                {
+                    Console.WriteLine($"Ошибка очистки OverlayId {overlayId} для камеры {_camera.Name}: {ex.Message}");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Console.WriteLine($"Ошибка очистки OverlayId {overlayId} для камеры {_camera.Name}: {ex.Message}");
+                }
+            }
         }
 
         private void OnCancelClicked(object? sender, EventArgs e)

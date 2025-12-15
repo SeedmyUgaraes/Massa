@@ -521,13 +521,13 @@ namespace MassaKWin
                 Padding = new Padding(10)
             };
 
-            var lblTemplate = new Label { Text = "Шаблон текста (используйте {weight})", AutoSize = true, Dock = DockStyle.Top };
+            var lblTemplate = new Label { Text = "Шаблон текста (используйте {net}, {tare}, {status}, {unit})", AutoSize = true, Dock = DockStyle.Top };
             _txtOverlayTemplate = new TextBox { Dock = DockStyle.Top, Width = 400 };
 
             var lblNoConnection = new Label { Text = "Текст при отсутствии подключения", AutoSize = true, Dock = DockStyle.Top };
             _txtOverlayNoConnection = new TextBox { Dock = DockStyle.Top, Width = 400 };
 
-            var lblUnstable = new Label { Text = "Текст при нестабильном весе", AutoSize = true, Dock = DockStyle.Top };
+            var lblUnstable = new Label { Text = "Статус при нестабильном весе", AutoSize = true, Dock = DockStyle.Top };
             _txtOverlayUnstable = new TextBox { Dock = DockStyle.Top, Width = 400 };
 
             var lblPosition = new Label { Text = "Положение по умолчанию", AutoSize = true, Dock = DockStyle.Top };

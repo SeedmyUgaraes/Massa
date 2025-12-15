@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using MassaKWin.Core;
@@ -23,6 +25,9 @@ namespace MassaKWin
         private bool _pollingEnabled = true;
         private readonly Dictionary<Guid, bool> _lastOnlineStates = new();
         private readonly Timer _uiTimer;
+        private readonly Timer _connectivityTimer;
+        private bool? _lastInternetOk;
+        private bool _checkingInternet;
 
         private TabControl tabControl;
         private TabPage tabScales;
@@ -124,6 +129,13 @@ namespace MassaKWin
             };
             _uiTimer.Tick += UiTimerOnTick;
             _uiTimer.Start();
+
+            _connectivityTimer = new Timer
+            {
+                Interval = 2000
+            };
+            _connectivityTimer.Tick += ConnectivityTimerOnTick;
+            _connectivityTimer.Start();
         }
 
         private void InitializeComponents()
@@ -599,6 +611,51 @@ namespace MassaKWin
             RefreshCamerasGrid();
         }
 
+        private async void ConnectivityTimerOnTick(object? sender, EventArgs e)
+        {
+            if (_checkingInternet)
+                return;
+
+            _checkingInternet = true;
+            try
+            {
+                bool internetOk = await Task.Run(CheckInternetAvailability);
+                if (_lastInternetOk != internetOk)
+                {
+                    _lastInternetOk = internetOk;
+                    if (internetOk)
+                        LogInfo("Internet RESTORED");
+                    else
+                        LogWarn("Internet LOST");
+                }
+            }
+            finally
+            {
+                _checkingInternet = false;
+            }
+        }
+
+        private bool CheckInternetAvailability()
+        {
+            try
+            {
+                if (!NetworkInterface.GetIsNetworkAvailable())
+                    return false;
+
+                var dnsTask = Dns.GetHostEntryAsync("cloudflare.com");
+                var completedTask = Task.WhenAny(dnsTask, Task.Delay(1000)).GetAwaiter().GetResult();
+                if (completedTask != dnsTask)
+                    return false;
+
+                dnsTask.GetAwaiter().GetResult();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private void RefreshScalesGrid()
         {
             if (InvokeRequired)
@@ -646,7 +703,23 @@ namespace MassaKWin
                     bool online = state.IsOnline(_offlineThreshold);
 
                     // обновляем "момент начала" текущего статуса
-                    state.UpdateStatus(online);
+                    var changed = state.UpdateStatus(online);
+                    if (changed)
+                    {
+                        _lastOnlineStates[scale.Id] = online;
+
+                        if (online)
+                            LogInfo($"Scale {scale.Name} ({scale.Ip}:{scale.Port}) ONLINE");
+                        else
+                            LogWarn($"Scale {scale.Name} ({scale.Ip}:{scale.Port}) OFFLINE");
+
+                        if (_settings.EnableSoundNotifications)
+                            System.Media.SystemSounds.Exclamation.Play();
+                    }
+                    else
+                    {
+                        _lastOnlineStates[scale.Id] = online;
+                    }
 
                     // сколько времени в текущем статусе
                     var statusAge = now - state.StatusSinceUtc;
@@ -721,14 +794,25 @@ namespace MassaKWin
             _historyManager.AddSample(scale);
 
             var online = scale.State.IsOnline(_offlineThreshold);
-            if (_lastOnlineStates.TryGetValue(scale.Id, out var prevOnline))
+            var changed = scale.State.UpdateStatus(online);
+            if (changed)
             {
-                if (prevOnline != online && _settings.EnableSoundNotifications)
+                _lastOnlineStates[scale.Id] = online;
+
+                if (_settings.EnableSoundNotifications)
                 {
                     System.Media.SystemSounds.Exclamation.Play();
                 }
+
+                if (online)
+                    LogInfo($"Scale {scale.Name} ({scale.Ip}:{scale.Port}) ONLINE");
+                else
+                    LogWarn($"Scale {scale.Name} ({scale.Ip}:{scale.Port}) OFFLINE");
             }
-            _lastOnlineStates[scale.Id] = online;
+            else
+            {
+                _lastOnlineStates[scale.Id] = online;
+            }
             BeginInvoke(new Action(RefreshScalesGrid));
         }
 
@@ -1061,6 +1145,21 @@ namespace MassaKWin
             }
         }
 
+        private void LogInfo(string message)
+        {
+            AppendLog($"[{DateTime.Now:HH:mm:ss}] INFO {message}");
+        }
+
+        private void LogWarn(string message)
+        {
+            AppendLog($"[{DateTime.Now:HH:mm:ss}] WARN {message}");
+        }
+
+        private void LogError(string message)
+        {
+            AppendLog($"[{DateTime.Now:HH:mm:ss}] ERROR {message}");
+        }
+
         private void AppendLog(string message)
         {
             BeginInvoke(new Action(() =>
@@ -1174,6 +1273,7 @@ namespace MassaKWin
             base.OnFormClosing(e);
 
             _uiTimer.Stop();
+            _connectivityTimer.Stop();
             if (_massaClient != null)
                 await _massaClient.StopAsync();
 

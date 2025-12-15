@@ -10,6 +10,7 @@ namespace MassaKWin.Core
         public List<ScaleConfigDto> Scales { get; set; } = new();
         public List<CameraConfigDto> Cameras { get; set; } = new();
         public List<CameraBindingConfigDto> Bindings { get; set; } = new();
+        public GlobalSettings Settings { get; set; } = new();
     }
 
     public class ScaleConfigDto
@@ -85,9 +86,12 @@ namespace MassaKWin.Core
             File.WriteAllText(_configPath, json);
         }
 
-        public AppConfig CreateFromManagers(ScaleManager scaleManager, CameraManager cameraManager)
+        public AppConfig CreateFromManagers(ScaleManager scaleManager, CameraManager cameraManager, GlobalSettings settings)
         {
-            var appConfig = new AppConfig();
+            var appConfig = new AppConfig
+            {
+                Settings = settings
+            };
 
             foreach (var scale in scaleManager.Scales)
             {

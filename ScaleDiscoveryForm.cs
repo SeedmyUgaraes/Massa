@@ -25,14 +25,18 @@ namespace MassaKWin
 
         private CancellationTokenSource? _cts;
         private bool _hasChanges;
+        private readonly GlobalSettings _settings;
+        private readonly int _probePort;
+        private readonly int _connectTimeoutMs;
+        private readonly int _parallelConnections;
 
-        private const int ProbePort = 5000;
-        private const int ConnectTimeoutMs = 2000;
-        private const int CommandTimeoutMs = 2000;
-
-        public ScaleDiscoveryForm(ScaleManager scaleManager)
+        public ScaleDiscoveryForm(ScaleManager scaleManager, GlobalSettings settings)
         {
             _scaleManager = scaleManager;
+            _settings = settings;
+            _probePort = settings.DefaultScalePort;
+            _connectTimeoutMs = settings.ScanIpTimeoutMs;
+            _parallelConnections = Math.Max(1, settings.ScanParallelConnections);
             InitializeComponent();
         }
 
@@ -65,7 +69,7 @@ namespace MassaKWin
             {
                 Location = new System.Drawing.Point(60, 9),
                 Width = 140,
-                Text = "192.168.0.1"
+                Text = _settings.AutoDiscoveryIpStart
             };
 
             var lblTo = new Label
@@ -79,7 +83,7 @@ namespace MassaKWin
             {
                 Location = new System.Drawing.Point(270, 9),
                 Width = 140,
-                Text = "192.168.0.254"
+                Text = _settings.AutoDiscoveryIpEnd
             };
 
             _btnScan = new Button
@@ -295,6 +299,8 @@ namespace MassaKWin
             _progressBar.Minimum = 0;
             _progressBar.Maximum = total;
             int processed = 0;
+            using var semaphore = new SemaphoreSlim(_parallelConnections);
+            var tasks = new List<Task>();
 
             for (uint val = fromVal; val <= toVal; val++)
             {
@@ -305,31 +311,56 @@ namespace MassaKWin
                 var b3 = (byte)((val >> 8) & 0xFF);
                 var b4 = (byte)(val & 0xFF);
                 var ip = new IPAddress(new[] { b1, b2, b3, b4 });
+                var ipText = ip.ToString();
 
-                var (isScale, name) = await ProbeHostAndReadNameAsync(ip.ToString(), ProbePort, ConnectTimeoutMs, ct);
-                processed++;
-
-                if (processed <= _progressBar.Maximum)
-                    _progressBar.Value = processed;
-                _lblStatus.Text = $"Просканировано {processed}/{total}";
-
-                if (isScale)
+                await semaphore.WaitAsync(ct);
+                tasks.Add(Task.Run(async () =>
                 {
-                    string status = string.IsNullOrWhiteSpace(name)
-                        ? "Найдено устройство, имя не прочитано"
-                        : "Найдены весы Massa-K";
-
-                    void addRow()
+                    try
                     {
-                        AddResultRow(ip.ToString(), ProbePort, name ?? string.Empty, status);
-                    }
+                        var (isScale, name) = await ProbeHostAndReadNameAsync(ipText, _probePort, _connectTimeoutMs, ct);
+                        if (isScale)
+                        {
+                            string status = string.IsNullOrWhiteSpace(name)
+                                ? "Найдено устройство, имя не прочитано"
+                                : "Найдены весы Massa-K";
 
-                    if (InvokeRequired)
-                        BeginInvoke((Action)addRow);
-                    else
-                        addRow();
-                }
+                            void addRow()
+                            {
+                                AddResultRow(ipText, _probePort, name ?? string.Empty, status);
+                            }
+
+                            if (InvokeRequired)
+                                BeginInvoke((Action)addRow);
+                            else
+                                addRow();
+                        }
+                    }
+                    finally
+                    {
+                        var processedLocal = Interlocked.Increment(ref processed);
+                        if (InvokeRequired)
+                        {
+                            BeginInvoke(new Action(() =>
+                            {
+                                if (processedLocal <= _progressBar.Maximum)
+                                    _progressBar.Value = processedLocal;
+                                _lblStatus.Text = $"Просканировано {processedLocal}/{total}";
+                            }));
+                        }
+                        else
+                        {
+                            if (processedLocal <= _progressBar.Maximum)
+                                _progressBar.Value = processedLocal;
+                            _lblStatus.Text = $"Просканировано {processedLocal}/{total}";
+                        }
+
+                        semaphore.Release();
+                    }
+                }, ct));
             }
+
+            await Task.WhenAll(tasks);
         }
 
         #endregion
@@ -608,7 +639,7 @@ namespace MassaKWin
                 if (string.IsNullOrWhiteSpace(ip))
                     continue;
 
-                int port = ProbePort;
+                int port = _probePort;
 
                 if (_scaleManager.Scales.Any(s => s.Ip == ip && s.Port == port))
                     continue;

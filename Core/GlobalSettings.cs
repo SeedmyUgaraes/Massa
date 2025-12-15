@@ -32,9 +32,9 @@ namespace MassaKWin.Core
         public int DefaultScalePort { get; set; } = 5000;
         public int ScanParallelConnections { get; set; } = 4;
         public int ScanIpTimeoutMs { get; set; } = 2000;
-        public string OverlayTextTemplate { get; set; } = "Weight: {weight}";
+        public string OverlayTextTemplate { get; set; } = "N {net}{unit} T {tare}{unit} [{status}]";
         public string OverlayNoConnectionText { get; set; } = "No connection";
-        public string OverlayUnstableText { get; set; } = "Unstable";
+        public string OverlayUnstableText { get; set; } = "U";
         public OverlayPosition OverlayDefaultPosition { get; set; } = OverlayPosition.TopLeft;
         public string LogDirectory { get; set; } = "logs";
         public bool EnableSoundNotifications { get; set; } = false;

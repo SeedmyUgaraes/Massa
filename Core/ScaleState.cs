@@ -14,7 +14,7 @@ namespace MassaKWin.Core
         /// <summary>
         /// Последний известный онлайн-статус. Null означает, что статус еще не определён.
         /// </summary>
-        public bool? LastStatus { get; private set; }
+        public bool? LastOnline { get; private set; }
 
         /// <summary>
         /// Момент времени, с которого весы находятся в текущем статусе.
@@ -34,14 +34,18 @@ namespace MassaKWin.Core
         /// Обновляет статус и при необходимости фиксирует момент смены состояния.
         /// </summary>
         /// <param name="online">Актуальный статус онлайн/оффлайн.</param>
-        public void UpdateStatus(bool online)
+        public bool UpdateStatus(bool online)
         {
-            if (LastStatus is null || online != LastStatus)
+            bool changed = LastOnline is null || online != LastOnline;
+
+            if (changed)
             {
                 StatusSinceUtc = DateTime.UtcNow;
             }
 
-            LastStatus = online;
+            LastOnline = online;
+
+            return changed;
         }
     }
 }

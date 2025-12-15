@@ -16,10 +16,14 @@ namespace MassaKWin.Core
         private readonly WeightUnit _weightUnit;
         private readonly int _decimals;
         private readonly Dictionary<Guid, string> _lastStatus;
+        private readonly Dictionary<Guid, bool?> _lastOnlineStates;
+        private readonly Dictionary<Guid, DateTime> _lastStatusChangeUtc;
+        private readonly Dictionary<Guid, DateTime> _lastSuccessUtc;
         private readonly Dictionary<Guid, HikvisionOsdClient> _clients;
         private readonly Dictionary<Guid, Task> _tasks;
         private readonly Dictionary<Guid, CancellationTokenSource> _tokens;
         private readonly object _statusLock = new();
+        private readonly TimeSpan _onlineTimeout = TimeSpan.FromSeconds(5);
 
         public event Action<string>? LogMessage;
 
@@ -41,6 +45,9 @@ namespace MassaKWin.Core
             _decimals = decimals;
 
             _lastStatus = new Dictionary<Guid, string>();
+            _lastOnlineStates = new Dictionary<Guid, bool?>();
+            _lastStatusChangeUtc = new Dictionary<Guid, DateTime>();
+            _lastSuccessUtc = new Dictionary<Guid, DateTime>();
             _clients = new Dictionary<Guid, HikvisionOsdClient>();
             _tasks = new Dictionary<Guid, Task>();
             _tokens = new Dictionary<Guid, CancellationTokenSource>();
@@ -93,6 +100,9 @@ namespace MassaKWin.Core
             lock (_statusLock)
             {
                 _lastStatus.Clear();
+                _lastOnlineStates.Clear();
+                _lastStatusChangeUtc.Clear();
+                _lastSuccessUtc.Clear();
             }
         }
 
@@ -108,6 +118,8 @@ namespace MassaKWin.Core
         {
             while (!token.IsCancellationRequested)
             {
+                CheckCameraTimeout(camera);
+
                 try
                 {
                     if (!_clients.TryGetValue(camera.Id, out var client))
@@ -136,10 +148,7 @@ namespace MassaKWin.Core
                             token);
                     }
 
-                    lock (_statusLock)
-                    {
-                        _lastStatus[camera.Id] = "Last update OK";
-                    }
+                    UpdateCameraStatus(camera, true);
                 }
                 catch (OperationCanceledException)
                 {
@@ -147,15 +156,15 @@ namespace MassaKWin.Core
                 }
                 catch (HttpRequestException ex)
                 {
-                    LogError(camera, ex);
+                    HandleCameraError(camera, ex);
                 }
                 catch (InvalidOperationException ex)
                 {
-                    LogError(camera, ex);
+                    HandleCameraError(camera, ex);
                 }
                 catch (Exception ex)
                 {
-                    LogError(camera, ex);
+                    HandleCameraError(camera, ex);
                 }
 
                 try
@@ -169,14 +178,65 @@ namespace MassaKWin.Core
             }
         }
 
-        private void LogError(Camera camera, Exception ex)
+        private void HandleCameraError(Camera camera, Exception ex)
         {
-            LogMessage?.Invoke(
-                $"[{DateTime.Now:HH:mm:ss}] Ошибка OSD для камеры \"{camera.Name}\" ({camera.Ip}): {ex.GetType().Name}: {ex.Message}");
+            var reason = $"{ex.GetType().Name}: {ex.Message}";
+            UpdateCameraStatus(camera, false, reason);
+        }
+
+        private void CheckCameraTimeout(Camera camera)
+        {
+            bool shouldMarkOffline = false;
 
             lock (_statusLock)
             {
-                _lastStatus[camera.Id] = $"Error: {ex.Message}";
+                if (_lastOnlineStates.TryGetValue(camera.Id, out var online) && online == true &&
+                    _lastSuccessUtc.TryGetValue(camera.Id, out var lastSuccess))
+                {
+                    if (DateTime.UtcNow - lastSuccess > _onlineTimeout)
+                        shouldMarkOffline = true;
+                }
+            }
+
+            if (shouldMarkOffline)
+            {
+                UpdateCameraStatus(camera, false, "OSD update timeout");
+            }
+        }
+
+        private void UpdateCameraStatus(Camera camera, bool online, string? reason = null)
+        {
+            bool? previous;
+
+            lock (_statusLock)
+            {
+                previous = _lastOnlineStates.TryGetValue(camera.Id, out var prev) ? prev : null;
+                _lastOnlineStates[camera.Id] = online;
+
+                if (!previous.HasValue || previous.Value != online)
+                {
+                    _lastStatusChangeUtc[camera.Id] = DateTime.UtcNow;
+                }
+
+                if (online)
+                {
+                    _lastSuccessUtc[camera.Id] = DateTime.UtcNow;
+                    _lastStatus[camera.Id] = "Online";
+                }
+                else
+                {
+                    var reasonText = string.IsNullOrWhiteSpace(reason) ? "Unknown" : reason;
+                    _lastStatus[camera.Id] = $"Offline: {reasonText}";
+                }
+            }
+
+            if (!previous.HasValue || previous.Value != online)
+            {
+                var messageSuffix = online
+                    ? "ONLINE"
+                    : $"OFFLINE{(string.IsNullOrWhiteSpace(reason) ? string.Empty : $" (reason: {reason})")}";
+
+                LogMessage?.Invoke($"[{DateTime.Now:HH:mm:ss}] Camera {camera.Name} ({camera.Ip}:{camera.Port}) {messageSuffix}");
             }
         }
 

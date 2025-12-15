@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using MassaKWin.Core;
@@ -11,13 +13,15 @@ namespace MassaKWin
         private readonly ScaleManager _scaleManager;
         private readonly WeightHistoryManager _historyManager;
         private readonly ConfigStorage _configStorage;
+        private GlobalSettings _settings = new();
         private MassaKClient? _massaClient;
         private CameraManager _cameraManager;
         private CameraOsdService? _cameraOsdService;
         private readonly TimeSpan _pollInterval = TimeSpan.FromMilliseconds(200);
-        private readonly TimeSpan _connectTimeout = TimeSpan.FromSeconds(3);
         private readonly TimeSpan _offlineThreshold = TimeSpan.FromSeconds(10);
         private readonly TimeSpan _reconnectDelay = TimeSpan.FromSeconds(5);
+        private bool _pollingEnabled = true;
+        private readonly Dictionary<Guid, bool> _lastOnlineStates = new();
         private readonly Timer _uiTimer;
 
         private TabControl tabControl;
@@ -32,9 +36,30 @@ namespace MassaKWin
         private Button _btnAddScale;
         private Button _btnDeleteScale;
         private Button _btnAutoDiscoverScales = null!;
+        private Button _btnStartPolling = null!;
+        private Button _btnStopPolling = null!;
         private Button _btnAddCamera;
         private Button _btnDeleteCamera;
         private Button _btnEditBindings;
+        private CheckBox _chkStartPollingOnStartup = null!;
+        private NumericUpDown _numScaleTimeout = null!;
+        private NumericUpDown _numDeadband = null!;
+        private ComboBox _cbWeightUnit = null!;
+        private NumericUpDown _numWeightDecimals = null!;
+        private CheckBox _chkAutoZeroOnConnect = null!;
+        private TextBox _txtDiscoveryFrom = null!;
+        private TextBox _txtDiscoveryTo = null!;
+        private NumericUpDown _numDefaultPort = null!;
+        private NumericUpDown _numParallelScan = null!;
+        private NumericUpDown _numScanTimeout = null!;
+        private TextBox _txtOverlayTemplate = null!;
+        private TextBox _txtOverlayNoConnection = null!;
+        private TextBox _txtOverlayUnstable = null!;
+        private ComboBox _cbOverlayPosition = null!;
+        private TextBox _txtLogDirectory = null!;
+        private Button _btnBrowseLogDirectory = null!;
+        private CheckBox _chkEnableSounds = null!;
+        private Button _btnSaveSettings = null!;
         private async void OnAddScaleClicked(object? sender, EventArgs e)
         {
             // Окно добавления/редактирования весов
@@ -51,7 +76,7 @@ namespace MassaKWin
             SaveConfig();
 
             // Асинхронно пересоздаём клиента весов и OSD-сервис камер
-            await RecreateScaleClientAsync();
+            await RecreateScaleClientAsync(_pollingEnabled);
             await RecreateCameraOsdServiceAsync();
 
             // Обновляем таблицы
@@ -61,12 +86,12 @@ namespace MassaKWin
 
         private async void OnAutoDiscoverScalesClicked(object? sender, EventArgs e)
         {
-            using (var dlg = new ScaleDiscoveryForm(_scaleManager))
+            using (var dlg = new ScaleDiscoveryForm(_scaleManager, _settings))
             {
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     SaveConfig();
-                    await RecreateScaleClientAsync();
+                    await RecreateScaleClientAsync(_pollingEnabled);
                     await RecreateCameraOsdServiceAsync();
                     RefreshScalesGrid();
                     RefreshCamerasGrid();
@@ -243,14 +268,46 @@ namespace MassaKWin
 
         private void InitializeSettingsTab()
         {
-            // Пока просто заглушка, чтобы форма собиралась
-            var lblPlaceholder = new Label
+            var panel = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                Text = "Здесь будут глобальные настройки (интервалы опроса, таймауты, история и т.п.)",
-                TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+                ColumnCount = 1,
+                RowCount = 6,
+                AutoScroll = true
             };
-            tabSettings.Controls.Add(lblPlaceholder);
+
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            panel.Controls.Add(CreatePollingGroup(), 0, 0);
+            panel.Controls.Add(CreateDiscoveryGroup(), 0, 1);
+            panel.Controls.Add(CreateOverlayGroup(), 0, 2);
+            panel.Controls.Add(CreateLoggingGroup(), 0, 3);
+            panel.Controls.Add(CreateNotificationsGroup(), 0, 4);
+
+            var bottomPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.RightToLeft,
+                Dock = DockStyle.Top,
+                Height = 45
+            };
+
+            _btnSaveSettings = new Button
+            {
+                Text = "Сохранить настройки",
+                AutoSize = true
+            };
+            _btnSaveSettings.Click += async (_, _) => await SaveSettingsAsync();
+
+            bottomPanel.Controls.Add(_btnSaveSettings);
+
+            panel.Controls.Add(bottomPanel, 0, 5);
+
+            tabSettings.Controls.Add(panel);
         }
 
         private void InitializeLogTab()
@@ -263,6 +320,277 @@ namespace MassaKWin
                 ScrollBars = ScrollBars.Vertical
             };
             tabLog.Controls.Add(txtLog);
+        }
+
+        private GroupBox CreatePollingGroup()
+        {
+            var group = new GroupBox
+            {
+                Text = "Опрос весов",
+                Dock = DockStyle.Top,
+                Padding = new Padding(10)
+            };
+
+            _chkStartPollingOnStartup = new CheckBox
+            {
+                Text = "Стартовать опрос при запуске",
+                AutoSize = true,
+                Dock = DockStyle.Top
+            };
+
+            _numScaleTimeout = new NumericUpDown
+            {
+                Minimum = 100,
+                Maximum = 60000,
+                Increment = 100,
+                Dock = DockStyle.Top
+            };
+            var lblTimeout = new Label
+            {
+                Text = "Таймаут ответа весов, мс",
+                Dock = DockStyle.Top,
+                AutoSize = true
+            };
+
+            _numDeadband = new NumericUpDown
+            {
+                Minimum = 0,
+                Maximum = 100000,
+                DecimalPlaces = 1,
+                Increment = 0.5M,
+                Dock = DockStyle.Top
+            };
+            var lblDeadband = new Label
+            {
+                Text = "Deadband (|Δweight| ≤ ... г игнорируется)",
+                Dock = DockStyle.Top,
+                AutoSize = true
+            };
+
+            _cbWeightUnit = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Dock = DockStyle.Top
+            };
+            _cbWeightUnit.Items.AddRange(new object[] { "kg", "g" });
+
+            var lblUnit = new Label
+            {
+                Text = "Единицы веса по умолчанию",
+                Dock = DockStyle.Top,
+                AutoSize = true
+            };
+
+            _numWeightDecimals = new NumericUpDown
+            {
+                Minimum = 0,
+                Maximum = 6,
+                Dock = DockStyle.Top
+            };
+            var lblDecimals = new Label
+            {
+                Text = "Цифр после запятой",
+                Dock = DockStyle.Top,
+                AutoSize = true
+            };
+
+            _chkAutoZeroOnConnect = new CheckBox
+            {
+                Text = "Авто-ноль/тара при подключении",
+                AutoSize = true,
+                Dock = DockStyle.Top
+            };
+
+            _btnStartPolling = new Button
+            {
+                Text = "Запустить опрос",
+                AutoSize = true,
+                Dock = DockStyle.Left
+            };
+            _btnStartPolling.Click += async (_, _) => await StartPollingAsync();
+
+            _btnStopPolling = new Button
+            {
+                Text = "Остановить опрос",
+                AutoSize = true,
+                Dock = DockStyle.Left
+            };
+            _btnStopPolling.Click += async (_, _) => await StopPollingAsync();
+
+            var buttonsPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true
+            };
+            buttonsPanel.Controls.Add(_btnStartPolling);
+            buttonsPanel.Controls.Add(_btnStopPolling);
+
+            group.Controls.Add(buttonsPanel);
+            group.Controls.Add(_chkAutoZeroOnConnect);
+            group.Controls.Add(_numWeightDecimals);
+            group.Controls.Add(lblDecimals);
+            group.Controls.Add(_cbWeightUnit);
+            group.Controls.Add(lblUnit);
+            group.Controls.Add(_numDeadband);
+            group.Controls.Add(lblDeadband);
+            group.Controls.Add(_numScaleTimeout);
+            group.Controls.Add(lblTimeout);
+            group.Controls.Add(_chkStartPollingOnStartup);
+
+            return group;
+        }
+
+        private GroupBox CreateDiscoveryGroup()
+        {
+            var group = new GroupBox
+            {
+                Text = "Автопоиск",
+                Dock = DockStyle.Top,
+                Padding = new Padding(10)
+            };
+
+            var lblRange = new Label
+            {
+                Text = "Диапазон IP: от ... до ...",
+                Dock = DockStyle.Top,
+                AutoSize = true
+            };
+
+            var ipPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true
+            };
+
+            _txtDiscoveryFrom = new TextBox { Width = 120 };
+            _txtDiscoveryTo = new TextBox { Width = 120 };
+            ipPanel.Controls.Add(_txtDiscoveryFrom);
+            ipPanel.Controls.Add(new Label { Text = "до", AutoSize = true, Padding = new Padding(5, 6, 5, 0) });
+            ipPanel.Controls.Add(_txtDiscoveryTo);
+
+            var portPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true
+            };
+            var lblPort = new Label { Text = "Порт по умолчанию", AutoSize = true, Padding = new Padding(0, 6, 5, 0) };
+            _numDefaultPort = new NumericUpDown { Minimum = 1, Maximum = 65535, Width = 100 };
+            portPanel.Controls.Add(lblPort);
+            portPanel.Controls.Add(_numDefaultPort);
+
+            var parallelPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true
+            };
+            var lblParallel = new Label { Text = "Параллельных подключений", AutoSize = true, Padding = new Padding(0, 6, 5, 0) };
+            _numParallelScan = new NumericUpDown { Minimum = 1, Maximum = 64, Width = 100 };
+            parallelPanel.Controls.Add(lblParallel);
+            parallelPanel.Controls.Add(_numParallelScan);
+
+            var timeoutPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true
+            };
+            var lblTimeout = new Label { Text = "Таймаут на IP, мс", AutoSize = true, Padding = new Padding(0, 6, 5, 0) };
+            _numScanTimeout = new NumericUpDown { Minimum = 100, Maximum = 60000, Increment = 100, Width = 100 };
+            timeoutPanel.Controls.Add(lblTimeout);
+            timeoutPanel.Controls.Add(_numScanTimeout);
+
+            group.Controls.Add(timeoutPanel);
+            group.Controls.Add(parallelPanel);
+            group.Controls.Add(portPanel);
+            group.Controls.Add(ipPanel);
+            group.Controls.Add(lblRange);
+
+            return group;
+        }
+
+        private GroupBox CreateOverlayGroup()
+        {
+            var group = new GroupBox
+            {
+                Text = "Overlay",
+                Dock = DockStyle.Top,
+                Padding = new Padding(10)
+            };
+
+            var lblTemplate = new Label { Text = "Шаблон текста (используйте {weight})", AutoSize = true, Dock = DockStyle.Top };
+            _txtOverlayTemplate = new TextBox { Dock = DockStyle.Top, Width = 400 };
+
+            var lblNoConnection = new Label { Text = "Текст при отсутствии подключения", AutoSize = true, Dock = DockStyle.Top };
+            _txtOverlayNoConnection = new TextBox { Dock = DockStyle.Top, Width = 400 };
+
+            var lblUnstable = new Label { Text = "Текст при нестабильном весе", AutoSize = true, Dock = DockStyle.Top };
+            _txtOverlayUnstable = new TextBox { Dock = DockStyle.Top, Width = 400 };
+
+            var lblPosition = new Label { Text = "Положение по умолчанию", AutoSize = true, Dock = DockStyle.Top };
+            _cbOverlayPosition = new ComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList };
+            _cbOverlayPosition.Items.AddRange(new object[]
+            {
+                "Слева сверху",
+                "Справа сверху",
+                "Слева снизу",
+                "Справа снизу"
+            });
+
+            group.Controls.Add(_cbOverlayPosition);
+            group.Controls.Add(lblPosition);
+            group.Controls.Add(_txtOverlayUnstable);
+            group.Controls.Add(lblUnstable);
+            group.Controls.Add(_txtOverlayNoConnection);
+            group.Controls.Add(lblNoConnection);
+            group.Controls.Add(_txtOverlayTemplate);
+            group.Controls.Add(lblTemplate);
+
+            return group;
+        }
+
+        private GroupBox CreateLoggingGroup()
+        {
+            var group = new GroupBox
+            {
+                Text = "Логи",
+                Dock = DockStyle.Top,
+                Padding = new Padding(10)
+            };
+
+            var lblFolder = new Label { Text = "Папка для логов", AutoSize = true, Dock = DockStyle.Top };
+            _txtLogDirectory = new TextBox { Dock = DockStyle.Top, Width = 400 };
+            _btnBrowseLogDirectory = new Button { Text = "Обзор...", AutoSize = true, Dock = DockStyle.Top };
+            _btnBrowseLogDirectory.Click += (_, _) => BrowseLogFolder();
+
+            group.Controls.Add(_btnBrowseLogDirectory);
+            group.Controls.Add(_txtLogDirectory);
+            group.Controls.Add(lblFolder);
+
+            return group;
+        }
+
+        private GroupBox CreateNotificationsGroup()
+        {
+            var group = new GroupBox
+            {
+                Text = "Уведомления",
+                Dock = DockStyle.Top,
+                Padding = new Padding(10)
+            };
+
+            _chkEnableSounds = new CheckBox
+            {
+                Text = "Включить звуковые уведомления",
+                AutoSize = true,
+                Dock = DockStyle.Top
+            };
+
+            group.Controls.Add(_chkEnableSounds);
+            return group;
         }
 
         private void UiTimerOnTick(object sender, EventArgs e)
@@ -309,9 +637,8 @@ namespace MassaKWin
                 {
                     var state = scale.State;
 
-                    // граммы -> кг
-                    var netKg = state.NetGrams / 1000.0;
-                    var tareKg = state.TareGrams / 1000.0;
+                    var netDisplay = WeightFormatter.FormatWeight(state.NetGrams, _settings.DefaultWeightUnit, _settings.WeightDecimalPlaces);
+                    var tareDisplay = WeightFormatter.FormatWeight(state.TareGrams, _settings.DefaultWeightUnit, _settings.WeightDecimalPlaces);
 
                     var now = DateTime.UtcNow;
 
@@ -335,8 +662,8 @@ namespace MassaKWin
                         scale.Name,                         // Имя весов
                         $"{scale.Ip}:{scale.Port}",         // IP:Port
                         scale.Protocol.ToString(),          // Протокол
-                        netKg.ToString("F3"),               // Net, кг
-                        tareKg.ToString("F3"),              // Tare, кг
+                        netDisplay,                          // Net
+                        tareDisplay,                         // Tare
                         state.Stable ? "Да" : "Нет",        // Stable
                         online ? "Да" : "Нет",              // Online
                         statusText                          // Статус + время
@@ -392,6 +719,16 @@ namespace MassaKWin
         private void OnScaleUpdated(Scale scale)
         {
             _historyManager.AddSample(scale);
+
+            var online = scale.State.IsOnline(_offlineThreshold);
+            if (_lastOnlineStates.TryGetValue(scale.Id, out var prevOnline))
+            {
+                if (prevOnline != online && _settings.EnableSoundNotifications)
+                {
+                    System.Media.SystemSounds.Exclamation.Play();
+                }
+            }
+            _lastOnlineStates[scale.Id] = online;
             BeginInvoke(new Action(RefreshScalesGrid));
         }
 
@@ -491,6 +828,8 @@ namespace MassaKWin
                 {
                     var cam = dlg.Camera;
 
+                    ApplyOverlayDefaults(cam);
+
                     int overlayId = 1;
                     foreach (var scale in _scaleManager.Scales)
                     {
@@ -560,7 +899,7 @@ namespace MassaKWin
             _scaleManager.Scales.Remove(scale);
 
             SaveConfig();
-            await RecreateScaleClientAsync();
+            await RecreateScaleClientAsync(_pollingEnabled);
             await RecreateCameraOsdServiceAsync();
 
             RefreshScalesGrid();
@@ -596,9 +935,12 @@ namespace MassaKWin
             try
             {
                 var config = _configStorage.Load();
+                _settings = config.Settings ?? new GlobalSettings();
+                _pollingEnabled = _settings.StartPollingOnStartup;
                 _configStorage.ApplyToManagers(config, _scaleManager, _cameraManager);
+                BindSettingsToUi();
 
-                await RecreateScaleClientAsync();
+                await RecreateScaleClientAsync(_pollingEnabled);
                 await RecreateCameraOsdServiceAsync();
 
                 RefreshScalesGrid();
@@ -614,12 +956,108 @@ namespace MassaKWin
         {
             try
             {
-                var config = _configStorage.CreateFromManagers(_scaleManager, _cameraManager);
+                var config = _configStorage.CreateFromManagers(_scaleManager, _cameraManager, _settings);
                 _configStorage.Save(config);
             }
             catch (Exception ex)
             {
                 AppendLog($"[{DateTime.Now:HH:mm:ss}] Ошибка сохранения конфигурации: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        private void BindSettingsToUi()
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(BindSettingsToUi));
+                return;
+            }
+
+            _chkStartPollingOnStartup.Checked = _settings.StartPollingOnStartup;
+            _numScaleTimeout.Value = Math.Max(_numScaleTimeout.Minimum, Math.Min(_numScaleTimeout.Maximum, _settings.ScaleResponseTimeoutMs));
+            _numDeadband.Value = (decimal)_settings.WeightDeadband;
+            _cbWeightUnit.SelectedIndex = _settings.DefaultWeightUnit == WeightUnit.Kg ? 0 : 1;
+            _numWeightDecimals.Value = Math.Max(_numWeightDecimals.Minimum, Math.Min(_numWeightDecimals.Maximum, _settings.WeightDecimalPlaces));
+            _chkAutoZeroOnConnect.Checked = _settings.AutoZeroOnConnect;
+            _txtDiscoveryFrom.Text = _settings.AutoDiscoveryIpStart;
+            _txtDiscoveryTo.Text = _settings.AutoDiscoveryIpEnd;
+            _numDefaultPort.Value = Math.Max(_numDefaultPort.Minimum, Math.Min(_numDefaultPort.Maximum, _settings.DefaultScalePort));
+            _numParallelScan.Value = Math.Max(_numParallelScan.Minimum, Math.Min(_numParallelScan.Maximum, _settings.ScanParallelConnections));
+            _numScanTimeout.Value = Math.Max(_numScanTimeout.Minimum, Math.Min(_numScanTimeout.Maximum, _settings.ScanIpTimeoutMs));
+            _txtOverlayTemplate.Text = _settings.OverlayTextTemplate;
+            _txtOverlayNoConnection.Text = _settings.OverlayNoConnectionText;
+            _txtOverlayUnstable.Text = _settings.OverlayUnstableText;
+            _cbOverlayPosition.SelectedIndex = (int)_settings.OverlayDefaultPosition;
+            _txtLogDirectory.Text = _settings.LogDirectory;
+            _chkEnableSounds.Checked = _settings.EnableSoundNotifications;
+        }
+
+        private void ReadSettingsFromUi()
+        {
+            _settings.StartPollingOnStartup = _chkStartPollingOnStartup.Checked;
+            _settings.ScaleResponseTimeoutMs = (int)_numScaleTimeout.Value;
+            _settings.WeightDeadband = (double)_numDeadband.Value;
+            _settings.DefaultWeightUnit = _cbWeightUnit.SelectedIndex == 0 ? WeightUnit.Kg : WeightUnit.Gram;
+            _settings.WeightDecimalPlaces = (int)_numWeightDecimals.Value;
+            _settings.AutoZeroOnConnect = _chkAutoZeroOnConnect.Checked;
+            _settings.AutoDiscoveryIpStart = _txtDiscoveryFrom.Text;
+            _settings.AutoDiscoveryIpEnd = _txtDiscoveryTo.Text;
+            _settings.DefaultScalePort = (int)_numDefaultPort.Value;
+            _settings.ScanParallelConnections = (int)_numParallelScan.Value;
+            _settings.ScanIpTimeoutMs = (int)_numScanTimeout.Value;
+            _settings.OverlayTextTemplate = _txtOverlayTemplate.Text;
+            _settings.OverlayNoConnectionText = _txtOverlayNoConnection.Text;
+            _settings.OverlayUnstableText = _txtOverlayUnstable.Text;
+            _settings.OverlayDefaultPosition = (OverlayPosition)_cbOverlayPosition.SelectedIndex;
+            _settings.LogDirectory = _txtLogDirectory.Text;
+            _settings.EnableSoundNotifications = _chkEnableSounds.Checked;
+        }
+
+        private async Task SaveSettingsAsync()
+        {
+            ReadSettingsFromUi();
+            _pollingEnabled = _settings.StartPollingOnStartup;
+            SaveConfig();
+            if (_pollingEnabled)
+                await RecreateScaleClientAsync(true);
+            else
+                await StopPollingAsync();
+            await RecreateCameraOsdServiceAsync();
+            RefreshScalesGrid();
+            RefreshCamerasGrid();
+        }
+
+        private void BrowseLogFolder()
+        {
+            using var dlg = new FolderBrowserDialog();
+            dlg.SelectedPath = Directory.Exists(_txtLogDirectory.Text)
+                ? _txtLogDirectory.Text
+                : AppContext.BaseDirectory;
+
+            if (dlg.ShowDialog(this) == DialogResult.OK)
+            {
+                _txtLogDirectory.Text = dlg.SelectedPath;
+            }
+        }
+
+        private async Task StartPollingAsync()
+        {
+            _pollingEnabled = true;
+            await RecreateScaleClientAsync(true);
+        }
+
+        private async Task StopPollingAsync()
+        {
+            _pollingEnabled = false;
+            if (_massaClient != null)
+            {
+                try
+                {
+                    await _massaClient.StopAsync();
+                }
+                catch
+                {
+                }
             }
         }
 
@@ -629,9 +1067,11 @@ namespace MassaKWin
             {
                 txtLog.AppendText(message + Environment.NewLine);
             }));
+
+            TryWriteLogToFile(message);
         }
 
-        private async Task RecreateScaleClientAsync()
+        private async Task RecreateScaleClientAsync(bool startImmediately)
         {
             if (_massaClient != null)
             {
@@ -647,13 +1087,60 @@ namespace MassaKWin
             _massaClient = new MassaKClient(
                 _scaleManager.Scales,
                 pollInterval: _pollInterval,
-                connectTimeout: _connectTimeout,
+                connectTimeout: TimeSpan.FromMilliseconds(_settings.ScaleResponseTimeoutMs),
                 offlineThreshold: _offlineThreshold,
-                reconnectDelay: _reconnectDelay);
+                reconnectDelay: _reconnectDelay,
+                deadbandGrams: _settings.WeightDeadband,
+                autoZeroOnConnect: _settings.AutoZeroOnConnect);
 
             _massaClient.LogMessage += AppendLog;
             _massaClient.ScaleUpdated += OnScaleUpdated;
-            _massaClient.Start();
+
+            if (startImmediately)
+            {
+                _massaClient.Start();
+            }
+        }
+
+        private void TryWriteLogToFile(string message)
+        {
+            try
+            {
+                var directory = string.IsNullOrWhiteSpace(_settings.LogDirectory)
+                    ? Path.Combine(AppContext.BaseDirectory, "logs")
+                    : _settings.LogDirectory;
+
+                Directory.CreateDirectory(directory);
+                var logPath = Path.Combine(directory, "app.log");
+                File.AppendAllText(logPath, message + Environment.NewLine);
+            }
+            catch
+            {
+                // Файловые ошибки намеренно игнорируем, чтобы не блокировать UI.
+            }
+        }
+
+        private void ApplyOverlayDefaults(Camera cam)
+        {
+            switch (_settings.OverlayDefaultPosition)
+            {
+                case OverlayPosition.TopLeft:
+                    cam.BasePosX = 100;
+                    cam.BasePosY = 100;
+                    break;
+                case OverlayPosition.TopRight:
+                    cam.BasePosX = 900;
+                    cam.BasePosY = 100;
+                    break;
+                case OverlayPosition.BottomLeft:
+                    cam.BasePosX = 100;
+                    cam.BasePosY = 900;
+                    break;
+                case OverlayPosition.BottomRight:
+                    cam.BasePosX = 900;
+                    cam.BasePosY = 900;
+                    break;
+            }
         }
 
         private async Task RecreateCameraOsdServiceAsync()
@@ -672,7 +1159,10 @@ namespace MassaKWin
             _cameraOsdService = new CameraOsdService(
                 _cameraManager.Cameras,
                 _scaleManager,
-                TimeSpan.FromMilliseconds(100));
+                TimeSpan.FromMilliseconds(100),
+                _settings,
+                _settings.DefaultWeightUnit,
+                _settings.WeightDecimalPlaces);
 
             _cameraOsdService.LogMessage += AppendLog;
 

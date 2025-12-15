@@ -12,6 +12,9 @@ namespace MassaKWin.Core
         private readonly IList<Camera> _cameras;
         private readonly ScaleManager _scaleManager;
         private readonly TimeSpan _updateInterval;
+        private readonly GlobalSettings _settings;
+        private readonly WeightUnit _weightUnit;
+        private readonly int _decimals;
         private readonly Dictionary<Guid, string> _lastStatus;
         private readonly Dictionary<Guid, HikvisionOsdClient> _clients;
         private readonly Dictionary<Guid, Task> _tasks;
@@ -20,13 +23,22 @@ namespace MassaKWin.Core
 
         public event Action<string>? LogMessage;
 
-        public CameraOsdService(IList<Camera> cameras, ScaleManager scaleManager, TimeSpan updateInterval)
+        public CameraOsdService(
+            IList<Camera> cameras,
+            ScaleManager scaleManager,
+            TimeSpan updateInterval,
+            GlobalSettings settings,
+            WeightUnit weightUnit,
+            int decimals)
         {
             _cameras = cameras;
             _scaleManager = scaleManager;
             _updateInterval = updateInterval < TimeSpan.FromMilliseconds(100)
                 ? TimeSpan.FromMilliseconds(100)
                 : updateInterval;
+            _settings = settings;
+            _weightUnit = weightUnit;
+            _decimals = decimals;
 
             _lastStatus = new Dictionary<Guid, string>();
             _clients = new Dictionary<Guid, HikvisionOsdClient>();
@@ -113,19 +125,7 @@ namespace MassaKWin.Core
                             : binding.PositionY;
 
                         var scale = binding.Scale ?? _scaleManager.Scales.FirstOrDefault(s => s.Id == binding.Id);
-                        string text;
-
-                        if (scale == null || !scale.State.IsOnline(_scaleManager.OfflineThreshold))
-                        {
-                            text = "Scale Offline";
-                        }
-                        else
-                        {
-                            var netKg = scale.State.NetGrams / 1000.0;
-                            var tareKg = scale.State.TareGrams / 1000.0;
-                            var status = scale.State.Stable ? "[OK]" : "[UNSTABLE]";
-                            text = $"N:{netKg:0.000} kg T:{tareKg:0.000} kg {status}";
-                        }
+                        string text = BuildOverlayText(scale);
 
                         await client.SendOverlayTextAsync(
                             camera.Ip,
@@ -178,6 +178,22 @@ namespace MassaKWin.Core
             {
                 _lastStatus[camera.Id] = $"Error: {ex.Message}";
             }
+        }
+
+        private string BuildOverlayText(Scale? scale)
+        {
+            if (scale == null || !scale.State.IsOnline(_scaleManager.OfflineThreshold))
+            {
+                return _settings.OverlayNoConnectionText;
+            }
+
+            if (!scale.State.Stable)
+            {
+                return _settings.OverlayUnstableText;
+            }
+
+            var formattedWeight = WeightFormatter.FormatWeight(scale.State.NetGrams, _weightUnit, _decimals);
+            return _settings.OverlayTextTemplate.Replace("{weight}", formattedWeight);
         }
     }
 }

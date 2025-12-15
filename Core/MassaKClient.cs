@@ -17,6 +17,9 @@ namespace MassaKWin.Core
         private readonly TimeSpan _connectTimeout;
         private readonly TimeSpan _offlineThreshold;
         private readonly TimeSpan _reconnectDelay;
+        private readonly TimeSpan _responseTimeout;
+        private readonly double _deadbandGrams;
+        private readonly bool _autoZeroOnConnect;
 
         private readonly Dictionary<Guid, Task> _tasks = new();
         private readonly Dictionary<Guid, CancellationTokenSource> _tokens = new();
@@ -29,13 +32,18 @@ namespace MassaKWin.Core
             TimeSpan pollInterval,
             TimeSpan connectTimeout,
             TimeSpan offlineThreshold,
-            TimeSpan reconnectDelay)
+            TimeSpan reconnectDelay,
+            double deadbandGrams,
+            bool autoZeroOnConnect)
         {
             _scales = scales ?? throw new ArgumentNullException(nameof(scales));
             _pollInterval = pollInterval;
             _connectTimeout = connectTimeout;
             _offlineThreshold = offlineThreshold;
             _reconnectDelay = reconnectDelay;
+            _responseTimeout = connectTimeout;
+            _deadbandGrams = deadbandGrams;
+            _autoZeroOnConnect = autoZeroOnConnect;
         }
 
         public void Start()
@@ -90,12 +98,24 @@ namespace MassaKWin.Core
                     LogMessage?.Invoke(
                         $"[{DateTime.Now:HH:mm:ss}] Подключение к весам \"{scale.Name}\" ({scale.Ip}:{scale.Port}) успешно.");
 
+                    if (_autoZeroOnConnect)
+                    {
+                        scale.State.NetGrams = 0;
+                        scale.State.TareGrams = 0;
+                        scale.State.LastUpdateUtc = DateTime.UtcNow;
+                        LogMessage?.Invoke(
+                            $"[{DateTime.Now:HH:mm:ss}] Авто-ноль выполнен для \"{scale.Name}\" после подключения.");
+                    }
+
                     while (!token.IsCancellationRequested)
                     {
                         var request = BuildGetMassaRequest();
-                        await stream.WriteAsync(request, 0, request.Length, token);
+                        using var responseCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                        responseCts.CancelAfter(_responseTimeout);
 
-                        var payload = await ReadPacketAsync(stream, token);
+                        await stream.WriteAsync(request, 0, request.Length, responseCts.Token);
+
+                        var payload = await ReadPacketAsync(stream, responseCts.Token);
                         ParsePacket(scale, payload);
                         ScaleUpdated?.Invoke(scale);
 
@@ -225,6 +245,11 @@ namespace MassaKWin.Core
             double factor = DivisionToFactor(division);
             double measured = rawMass * factor;
             double tareValue = 0.0;
+
+            if (_deadbandGrams > 0 && Math.Abs(measured - scale.State.NetGrams) <= _deadbandGrams)
+            {
+                measured = scale.State.NetGrams;
+            }
 
             if (scale.Protocol == ScaleProtocol.WithTare && payload.Length >= offset + 8 + 4)
             {

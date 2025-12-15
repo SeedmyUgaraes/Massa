@@ -187,13 +187,16 @@ namespace MassaKWin.Core
                 return _settings.OverlayNoConnectionText;
             }
 
-            if (!scale.State.Stable)
-            {
-                return _settings.OverlayUnstableText;
-            }
+            var net = WeightFormatter.FormatWeight(scale.State.NetGrams, _weightUnit, _decimals);
+            var tare = WeightFormatter.FormatWeight(scale.State.TareGrams, _weightUnit, _decimals);
+            var status = scale.State.Stable ? "S" : _settings.OverlayUnstableText;
+            var unit = _weightUnit == WeightUnit.Kg ? "kg" : "g";
 
-            var formattedWeight = WeightFormatter.FormatWeight(scale.State.NetGrams, _weightUnit, _decimals);
-            return _settings.OverlayTextTemplate.Replace("{weight}", formattedWeight);
+            return _settings.OverlayTextTemplate
+                .Replace("{net}", net)
+                .Replace("{tare}", tare)
+                .Replace("{unit}", unit)
+                .Replace("{status}", status);
         }
     }
 }

@@ -53,6 +53,31 @@ namespace MassaKWin.Core
             }
         }
 
+        public async Task ClearOverlayAsync(
+            string cameraIp,
+            int overlayId,
+            CancellationToken cancellationToken = default)
+        {
+            var url = $"http://{cameraIp}/ISAPI/System/Video/inputs/channels/1/overlays/text/{overlayId}";
+            var xml = $@"
+<TextOverlay>
+  <id>{overlayId}</id>
+  <enabled>false</enabled>
+  <positionX>0</positionX>
+  <positionY>0</positionY>
+  <displayText></displayText>
+  <directAngle/>
+</TextOverlay>";
+
+            using var content = new StringContent(xml, Encoding.UTF8, "application/xml");
+            using var response = await _httpClient.PutAsync(url, content, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                throw new InvalidOperationException($"Hikvision OSD error: {(int)response.StatusCode} {response.ReasonPhrase}. Body: {body}");
+            }
+        }
+
         public void Dispose()
         {
             _httpClient.Dispose();

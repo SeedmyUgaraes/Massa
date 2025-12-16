@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
@@ -24,6 +25,15 @@ namespace MassaKWin.Core
         private readonly Dictionary<Guid, CancellationTokenSource> _tokens;
         private readonly object _statusLock = new();
         private readonly TimeSpan _onlineTimeout = TimeSpan.FromSeconds(5);
+        private readonly ConcurrentDictionary<(Guid CameraId, int OverlayId), OverlayCacheEntry> _overlayCache;
+        private readonly ConcurrentDictionary<Guid, bool> _dirtyScales;
+        private readonly ConcurrentDictionary<Guid, bool> _dirtyCameras;
+        private readonly ConcurrentDictionary<Guid, DateTime> _lastStatusChecksUtc;
+
+        private static readonly TimeSpan MinOverlayUpdateInterval = TimeSpan.FromMilliseconds(100);
+        private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromMilliseconds(5000);
+
+        public event Action<Guid, bool, string?>? CameraStatusChanged;
 
         public event Action<string>? LogMessage;
 
@@ -51,6 +61,20 @@ namespace MassaKWin.Core
             _clients = new Dictionary<Guid, HikvisionOsdClient>();
             _tasks = new Dictionary<Guid, Task>();
             _tokens = new Dictionary<Guid, CancellationTokenSource>();
+            _overlayCache = new ConcurrentDictionary<(Guid, int), OverlayCacheEntry>();
+            _dirtyScales = new ConcurrentDictionary<Guid, bool>();
+            _dirtyCameras = new ConcurrentDictionary<Guid, bool>();
+            _lastStatusChecksUtc = new ConcurrentDictionary<Guid, DateTime>();
+        }
+
+        public void MarkScaleDirty(Guid scaleId)
+        {
+            _dirtyScales[scaleId] = true;
+        }
+
+        public void MarkCameraDirty(Guid cameraId)
+        {
+            _dirtyCameras[cameraId] = true;
         }
 
         public void Start()
@@ -96,6 +120,10 @@ namespace MassaKWin.Core
             _tasks.Clear();
             _tokens.Clear();
             _clients.Clear();
+            _overlayCache.Clear();
+            _dirtyScales.Clear();
+            _dirtyCameras.Clear();
+            _lastStatusChecksUtc.Clear();
 
             lock (_statusLock)
             {
@@ -116,14 +144,25 @@ namespace MassaKWin.Core
 
         private async Task RunCameraLoopAsync(Camera camera, CancellationToken token)
         {
+            var lastStatusCheck = DateTime.MinValue;
+
             while (!token.IsCancellationRequested)
             {
                 CheckCameraTimeout(camera);
+
+                if (DateTime.UtcNow - lastStatusCheck >= TimeSpan.FromSeconds(1))
+                {
+                    MarkDirtyScalesForCamera(camera);
+                    lastStatusCheck = DateTime.UtcNow;
+                }
 
                 try
                 {
                     if (!_clients.TryGetValue(camera.Id, out var client))
                         throw new InvalidOperationException("Client not initialized for camera.");
+
+                    var dirtyCamera = _dirtyCameras.ContainsKey(camera.Id);
+                    var keepCameraDirty = false;
 
                     for (int i = 0; i < camera.Bindings.Count; i++)
                     {
@@ -131,21 +170,58 @@ namespace MassaKWin.Core
                         if (!binding.Enabled)
                             continue;
 
+                        var scale = binding.Scale ?? _scaleManager.Scales.FirstOrDefault(s => s.Id == binding.Id);
+                        var cacheKey = (camera.Id, binding.OverlayId);
+
+                        bool scaleDirty = scale != null && _dirtyScales.ContainsKey(scale.Id);
+                        bool shouldProcess = dirtyCamera || scaleDirty;
+
+                        if (!shouldProcess && _overlayCache.TryGetValue(cacheKey, out var cacheEntry))
+                        {
+                            if (DateTime.UtcNow - cacheEntry.LastSentUtc >= KeepAliveInterval)
+                            {
+                                shouldProcess = true;
+                            }
+                        }
+
+                        if (!shouldProcess)
+                            continue;
+
+                        var newText = BuildOverlayText(scale);
+                        var now = DateTime.UtcNow;
+
+                        if (!ShouldSendOverlay(cacheKey, newText, now, out var retryLater))
+                        {
+                            if (retryLater)
+                                keepCameraDirty = keepCameraDirty || dirtyCamera;
+
+                            if (!retryLater && scale != null)
+                                _dirtyScales.TryRemove(scale.Id, out _);
+
+                            continue;
+                        }
+
                         int positionX = binding.AutoPosition ? camera.BasePosX : binding.PositionX;
                         int positionY = binding.AutoPosition
                             ? camera.BasePosY + i * camera.LineHeight
                             : binding.PositionY;
-
-                        var scale = binding.Scale ?? _scaleManager.Scales.FirstOrDefault(s => s.Id == binding.Id);
-                        string text = BuildOverlayText(scale);
 
                         await client.SendOverlayTextAsync(
                             camera.Ip,
                             binding.OverlayId,
                             positionX,
                             positionY,
-                            text,
+                            newText,
                             token);
+
+                        _overlayCache[cacheKey] = new OverlayCacheEntry(newText, now);
+                        if (scale != null)
+                            _dirtyScales.TryRemove(scale.Id, out _);
+                    }
+
+                    if (!keepCameraDirty)
+                    {
+                        _dirtyCameras.TryRemove(camera.Id, out _);
                     }
 
                     UpdateCameraStatus(camera, true);
@@ -176,6 +252,54 @@ namespace MassaKWin.Core
                     break;
                 }
             }
+        }
+
+        private void MarkDirtyScalesForCamera(Camera camera)
+        {
+            foreach (var binding in camera.Bindings)
+            {
+                if (!binding.Enabled)
+                    continue;
+
+                var scale = binding.Scale ?? _scaleManager.Scales.FirstOrDefault(s => s.Id == binding.Id);
+                if (scale == null)
+                    continue;
+
+                var now = DateTime.UtcNow;
+                if (_lastStatusChecksUtc.TryGetValue(scale.Id, out var lastCheck) && now - lastCheck < TimeSpan.FromSeconds(1))
+                    continue;
+
+                _lastStatusChecksUtc[scale.Id] = now;
+
+                var online = scale.State.IsOnline(_scaleManager.OfflineThreshold);
+                var lastOnline = scale.State.LastOnline;
+
+                if (!lastOnline.HasValue || lastOnline.Value != online)
+                {
+                    _dirtyScales[scale.Id] = true;
+                }
+            }
+        }
+
+        private bool ShouldSendOverlay((Guid CameraId, int OverlayId) cacheKey, string newText, DateTime now, out bool retrySoon)
+        {
+            retrySoon = false;
+
+            if (_overlayCache.TryGetValue(cacheKey, out var cacheEntry))
+            {
+                if (newText == cacheEntry.LastText && now - cacheEntry.LastSentUtc < KeepAliveInterval)
+                {
+                    return false;
+                }
+
+                if (now - cacheEntry.LastSentUtc < MinOverlayUpdateInterval)
+                {
+                    retrySoon = true;
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private void HandleCameraError(Camera camera, Exception ex)
@@ -232,11 +356,8 @@ namespace MassaKWin.Core
 
             if (!previous.HasValue || previous.Value != online)
             {
-                var messageSuffix = online
-                    ? "ONLINE"
-                    : $"OFFLINE{(string.IsNullOrWhiteSpace(reason) ? string.Empty : $" (reason: {reason})")}";
-
-                LogMessage?.Invoke($"[{DateTime.Now:HH:mm:ss}] Camera {camera.Name} ({camera.Ip}:{camera.Port}) {messageSuffix}");
+                _dirtyCameras[camera.Id] = true;
+                CameraStatusChanged?.Invoke(camera.Id, online, reason);
             }
         }
 
@@ -244,14 +365,38 @@ namespace MassaKWin.Core
         {
             if (scale == null || !scale.State.IsOnline(_scaleManager.OfflineThreshold))
             {
-                return _settings.OverlayNoConnectionText;
+                return string.IsNullOrWhiteSpace(_settings.OverlayNoConnectionText)
+                    ? "Scale Offline"
+                    : _settings.OverlayNoConnectionText;
             }
 
-            var netKg = scale.State.NetGrams / 1000.0;
-            var tareKg = scale.State.TareGrams / 1000.0;
-            var status = scale.State.Stable ? "[S]" : $"[{_settings.OverlayUnstableText}]";
+            var unitText = _weightUnit == WeightUnit.Kg ? "kg" : "g";
+            var status = scale.State.Stable ? "[OK]" : $"[{_settings.OverlayUnstableText}]";
 
-            return $"N {netKg:0.00}kg T {tareKg:0.00}kg {status}";
+            var template = string.IsNullOrWhiteSpace(_settings.OverlayTextTemplate)
+                ? "N {net}{unit} T {tare}{unit} {status}"
+                : _settings.OverlayTextTemplate;
+
+            var netText = WeightFormatter.FormatWeight(scale.State.NetGrams, _weightUnit, _decimals);
+            var tareText = WeightFormatter.FormatWeight(scale.State.TareGrams, _weightUnit, _decimals);
+
+            return template
+                .Replace("{net}", netText)
+                .Replace("{tare}", tareText)
+                .Replace("{unit}", unitText)
+                .Replace("{status}", status);
+        }
+
+        private class OverlayCacheEntry
+        {
+            public OverlayCacheEntry(string lastText, DateTime lastSentUtc)
+            {
+                LastText = lastText;
+                LastSentUtc = lastSentUtc;
+            }
+
+            public string LastText { get; }
+            public DateTime LastSentUtc { get; }
         }
     }
 }

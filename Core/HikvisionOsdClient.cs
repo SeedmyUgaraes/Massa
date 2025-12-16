@@ -22,7 +22,10 @@ namespace MassaKWin.Core
                 PreAuthenticate = true,
                 Credentials = new NetworkCredential(username, password)
             };
-            _httpClient = new HttpClient(handler);
+            _httpClient = new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromSeconds(3)
+            };
         }
 
         public async Task SendOverlayTextAsync(

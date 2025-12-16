@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using MassaKWin.Core;
@@ -792,12 +793,15 @@ namespace MassaKWin
         private void OnScaleUpdated(Scale scale)
         {
             _historyManager.AddSample(scale);
+            _cameraOsdService?.MarkScaleDirty(scale.Id);
 
             var online = scale.State.IsOnline(_offlineThreshold);
             var changed = scale.State.UpdateStatus(online);
             if (changed)
             {
                 _lastOnlineStates[scale.Id] = online;
+
+                _cameraOsdService?.MarkScaleDirty(scale.Id);
 
                 if (_settings.EnableSoundNotifications)
                 {
@@ -814,6 +818,24 @@ namespace MassaKWin
                 _lastOnlineStates[scale.Id] = online;
             }
             BeginInvoke(new Action(RefreshScalesGrid));
+        }
+
+        private void OnCameraStatusChanged(Guid cameraId, bool isOnline, string? reason)
+        {
+            var camera = _cameraManager.Cameras.FirstOrDefault(c => c.Id == cameraId);
+            var name = camera?.Name ?? cameraId.ToString();
+            var endpoint = camera != null ? $"{camera.Ip}:{camera.Port}" : "unknown";
+
+            var statusText = isOnline ? "ONLINE" : "OFFLINE";
+            if (!isOnline && !string.IsNullOrWhiteSpace(reason))
+            {
+                statusText += $" (reason: {reason})";
+            }
+
+            if (isOnline)
+                LogInfo($"Camera {name} ({endpoint}) {statusText}");
+            else
+                LogWarn($"Camera {name} ({endpoint}) {statusText}");
         }
 
         private void RefreshCamerasGrid()
@@ -1263,7 +1285,7 @@ namespace MassaKWin
                 _settings.DefaultWeightUnit,
                 _settings.WeightDecimalPlaces);
 
-            _cameraOsdService.LogMessage += AppendLog;
+            _cameraOsdService.CameraStatusChanged += OnCameraStatusChanged;
 
             _cameraOsdService.Start();
         }

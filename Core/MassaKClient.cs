@@ -115,9 +115,29 @@ namespace MassaKWin.Core
 
                         await stream.WriteAsync(request, 0, request.Length, responseCts.Token);
 
+                        var previousNet = scale.State.NetGrams;
+                        var previousTare = scale.State.TareGrams;
+                        var previousStable = scale.State.Stable;
+                        var previousProtocol = scale.Protocol;
+                        var previousNetFlag = scale.State.NetFlag;
+                        var previousZeroFlag = scale.State.ZeroFlag;
+                        var previousLastUpdate = scale.State.LastUpdateUtc;
+
                         var payload = await ReadPacketAsync(stream, responseCts.Token);
                         ParsePacket(scale, payload);
-                        ScaleUpdated?.Invoke(scale);
+
+                        var netChanged = Math.Abs(scale.State.NetGrams - previousNet) > _deadbandGrams;
+                        var tareChanged = Math.Abs(scale.State.TareGrams - previousTare) > _deadbandGrams;
+                        var stableChanged = previousStable != scale.State.Stable;
+                        var protocolChanged = previousProtocol != scale.Protocol;
+                        var netFlagChanged = previousNetFlag != scale.State.NetFlag;
+                        var zeroFlagChanged = previousZeroFlag != scale.State.ZeroFlag;
+                        var firstUpdate = previousLastUpdate == default;
+
+                        if (netChanged || tareChanged || stableChanged || protocolChanged || netFlagChanged || zeroFlagChanged || firstUpdate)
+                        {
+                            ScaleUpdated?.Invoke(scale);
+                        }
 
                         await Task.Delay(_pollInterval, token);
                     }

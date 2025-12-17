@@ -1,0 +1,166 @@
+Architecture Description
+========================
+
+Scope
+-----
+Описание охватывает исходники приложения MassaKWin (WinForms) в корне репозитория, включая папку Core и формы UI. Тесты и бинарные артефакты не рассматриваются.
+
+Overview
+--------
+MassaKWin — настольное WinForms-приложение для мониторинга сетевых весов Massa-K по протоколу 100 и вывода текущих показаний на OSD-оверлеи IP-камер Hikvision. Пользователь может добавлять/удалять весы и камеры, настраивать параметры опроса и отображения, а также наблюдать историю веса.
+
+Program Purpose
+---------------
+- Периодически опрашивать конфигурируемые весы по TCP и отслеживать их состояние (масса, тара, стабильность, онлайн/оффлайн).
+- Формировать текстовые оверлеи с показаниями и отправлять их на привязанные камеры через ISAPI Hikvision.
+- Сохранять конфигурацию весов, камер, привязок и глобальных настроек в JSON, восстанавливать её при старте и позволять редактировать через UI.
+- Вести историю измерений и визуализировать тренды веса.
+
+Primary Workflow
+----------------
+1. `Program.Main()` регистрирует кодовую страницу, настраивает визуальные стили WinForms и запускает `MainForm`.
+2. `MainForm` создаёт менеджеры весов/истории/камер, инициализирует вкладки UI и таймеры обновления.
+3. При загрузке конфигурации создаются объекты весов и камер, запускается опрос при необходимости и подготавливается OSD-сервис.
+4. Цикл опроса `MassaKClient` подключается к каждому весу, запрашивает пакет CMD_GET_MASSA, обновляет состояние и уведомляет UI/OSD/историю при изменениях.
+5. `CameraOsdService` регулярно строит текст оверлеев по данным весов, отправляет их на камеры через `HikvisionOsdClient`, отслеживает статусы онлайн/оффлайн и кэширует последние значения.
+6. Пользователь через формы добавляет/удаляет сущности, запускает автообнаружение, настраивает параметры и просматривает тренды; изменения сохраняются в конфигурацию и перезапускают опрос/OSD.
+
+Input Data
+----------
+- Конфигурация `config.json` в каталоге приложения: содержит перечень весов, камер, привязок и глобальные настройки. Создаётся автоматически при сохранении, загружается при старте (`ConfigStorage`).
+- Пользовательский ввод в формах: параметры весов (IP, порт), камер (IP, учетные данные), привязок оверлеев, границы автопоиска, единицы измерения и др.
+- Сетевые ответы весов по TCP (протокол 100): бинарные пакеты с массой, тарой, статусами.
+
+Output Data
+-----------
+- JSON-конфигурация `config.json`, обновляемая при сохранении настроек.
+- OSD-оверлеи, отправленные на камеры Hikvision по HTTP ISAPI.
+- Лог-сообщения в текстовое поле UI; предполагается поддержка звуков и сохранения логов в каталог (путь хранится в настройках, реализовано частично).
+- Данные истории веса в памяти (`WeightHistoryManager`) для графиков тренда.
+
+External Dependencies
+---------------------
+- TCP-подключения к весам Massa-K (протокол 100, порты по настройкам).
+- HTTP ISAPI API камер Hikvision для управления текстовыми оверлеями (Basic Auth).
+- Локальная файловая система для `config.json` и директории логов.
+- Параметры среды отсутствуют; код регистрирует провайдер кодировок для Windows-1251.
+
+Module/Package Architecture
+---------------------------
+- **Core**: бизнес-логика и модели.
+  - `Scale`, `ScaleState`, `ScaleProtocol` — описания весов и их состояния.
+  - `ScaleManager` — хранение списка весов и порог офлайн.
+  - `MassaKClient` — асинхронный опрос весов по TCP, парсинг пакетов, оповещение об обновлениях.
+  - `Camera`, `CameraScaleBinding`, `CameraManager` — модели камер и привязок, управление списками.
+  - `HikvisionOsdClient` — отправка/очистка текстовых оверлеев на камеры.
+  - `CameraOsdService` — цикл построения текстов, отправка на камеры, кэширование, отслеживание статуса.
+  - `ConfigStorage` (+ DTO) — загрузка/сохранение конфигурации и синхронизация с менеджерами.
+  - `GlobalSettings`, `WeightUnit`, `OverlayPosition` — глобальные параметры опроса/отображения.
+  - `WeightFormatter` — конвертация и форматирование веса.
+  - `WeightHistoryManager` — сбор и выдача истории измерений.
+- **UI (WinForms)**: формы взаимодействия с пользователем.
+  - `Program` — точка входа.
+  - `MainForm` — основной интерфейс с вкладками весов, камер, настроек и лога; управляет менеджерами, таймерами и сервисами.
+  - `ScaleEditForm`, `CameraEditForm` — диалоги добавления/редактирования сущностей.
+  - `ScaleDiscoveryForm`, `CameraBindingsForm`, `WeightTrendForm` и другие — вспомогательные формы (по исходникам проекта; логика автопоиска/привязок оформлена в UI и использует менеджеры/настройки).
+
+Class Details
+-------------
+- `Program` (`Program.cs`)
+  - `Main()` — регистрирует кодировки, включает визуальные стили и запускает `MainForm`.
+
+- `Scale` (`Core/Scale.cs`)
+  - Поля: `Id`, `Name`, `Ip`, `Port`, `Protocol`, `State`.
+  - Хранит конфигурацию одного устройства и текущее состояние.
+
+- `ScaleState` (`Core/ScaleState.cs`)
+  - Поля: `NetGrams`, `TareGrams`, `Stable`, `NetFlag`, `ZeroFlag`, `LastUpdateUtc`, `LastOnline`, `StatusSinceUtc`.
+  - `IsOnline(offlineThreshold)` — считает офлайн по давности обновления.
+  - `UpdateStatus(online)` — фиксирует смену статуса и время изменения.
+
+- `ScaleManager` (`Core/ScaleManager.cs`)
+  - `Scales` — список весов; `OfflineThreshold` — допустимое время без обновлений.
+  - Методы `AddScale`, `RemoveScale` — управление коллекцией.
+
+- `MassaKClient` (`Core/MassaKClient.cs`)
+  - Конструктор принимает список весов, интервалы опроса/подключения, deadband, автоноль.
+  - События: `ScaleUpdated`, `LogMessage`.
+  - `Start()` — запускает задачи опроса по каждому весу с токенами отмены.
+  - `StopAsync()` — отменяет токены и ждёт завершения задач.
+  - `PollLoopAsync(scale, token)` — цикл подключения, отправки CMD_GET_MASSA, чтения пакета, обновления состояния и детекции изменений (с deadband/флагами/первым обновлением); логирует ошибки и выдерживает задержки переподключения.
+  - `BuildGetMassaRequest()` — формирует бинарный запрос с CRC16.
+  - `ReadPacketAsync()/ReadExactAsync()` — читает и валидирует заголовок, длину и CRC, выбрасывая `IOException`/`TimeoutException` при ошибках.
+  - `ParsePacket(scale, payload)` — определяет протокол (с/без тары), разбирает массу/тару/флаги, применяет deadband и обновляет `Scale.State`.
+  - `DivisionToFactor()` — переводит делитель в множитель для веса.
+  - `ConnectWithTimeoutAsync()` — подключение с таймаутом и отменой.
+  - `ComputeCrc16()` — алгоритм CRC16 из мануала.
+
+- `Camera` (`Core/Camera.cs`)
+  - Поля: `Id`, `Name`, `Ip`, `Port`, `Username`, `Password`, `BasePosX`, `BasePosY`, `LineHeight`, `Bindings`.
+  - Представляет IP-камеру и параметры позиционирования оверлеев.
+
+- `CameraScaleBinding` (`Core/CameraScaleBinding.cs`)
+  - Поля: `Id`, `Camera`, `Scale`, `OverlayId`, `PositionX`, `PositionY`, `Enabled`, `AutoPosition`.
+  - Описывает привязку весов к конкретному текстовому оверлею камеры.
+
+- `CameraManager` (`Core/CameraManager.cs`)
+  - `Cameras` — коллекция камер; методы `AddCamera`, `RemoveCamera`.
+
+- `HikvisionOsdClient` (`Core/HikvisionOsdClient.cs`)
+  - Конструктор принимает учётные данные; создаёт `HttpClient` с Basic Auth.
+  - `SendOverlayTextAsync(cameraIp, overlayId, posX, posY, text)` — PUT на ISAPI `/overlays/text/{id}` с XML; выбрасывает `InvalidOperationException` при неуспехе.
+  - `ClearOverlayAsync(cameraIp, overlayId)` — выключает оверлей.
+  - `Dispose()` — освобождает `HttpClient`.
+
+- `CameraOsdService` (`Core/CameraOsdService.cs`)
+  - Зависимости: списки камер, `ScaleManager`, интервал обновления, `GlobalSettings`, единица измерения и точность.
+  - События: `CameraStatusChanged`, `LogMessage`.
+  - `Start()`/`StopAsync()` — создаёт клиенты на камеру, запускает/останавливает задачи, очищает кэши.
+  - `MarkScaleDirty(scaleId)`, `MarkCameraDirty(cameraId)` — помечают необходимость обновления.
+  - `GetCameraStatus(cameraId)` — последняя строка статуса.
+  - `RunCameraLoopAsync(camera, token)` — цикл проверки статуса, определения грязных привязок, генерации текста (`BuildOverlayText`), вычисления позиций (автопозиция/ручная), отправки через `HikvisionOsdClient` с кэшированием и контроль частоты отправок; обновляет статусы, ловит сетевые исключения.
+  - Внутренние помощники: `MarkDirtyScalesForCamera`, `ShouldSendOverlay`, `HandleCameraError`, `CheckCameraTimeout`, `UpdateCameraStatus`, `BuildOverlayText` (шаблон/статусы/единицы веса), класс `OverlayCacheEntry`.
+
+- `ConfigStorage` (`Core/ConfigStorage.cs`)
+  - DTO: `AppConfig`, `ScaleConfigDto`, `CameraConfigDto`, `CameraBindingConfigDto`.
+  - Конструктор принимает имя файла (по умолчанию `config.json` в `AppContext.BaseDirectory`).
+  - `Load()` — читает/десериализует JSON; при ошибке возвращает пустую конфигурацию.
+  - `Save(config)` — сериализует с отступами.
+  - `CreateFromManagers(scaleManager, cameraManager, settings)` — собирает DTO из текущих объектов.
+  - `ApplyToManagers(config, scaleManager, cameraManager)` — очищает списки, создаёт объекты весов/камер, восстанавливает привязки камер к весам.
+
+- `GlobalSettings`, `WeightUnit`, `OverlayPosition` (`Core/GlobalSettings.cs`)
+  - Настройки опроса (таймауты, deadband, автоноль), автопоиска, форматирования оверлеев (шаблон, тексты, позиция), единицы измерения и логирование/звук.
+
+- `WeightFormatter` (`Core/WeightFormatter.cs`)
+  - `FormatWeight(grams, unit, decimals)` — переводит в единицу (кг/г) и форматирует с фиксированной точностью.
+  - `ConvertWeight(grams, unit)` — конвертер грамм → выбранная единица.
+
+- `WeightHistoryManager` (`Core/WeightHistoryManager.cs`)
+  - Хранит историю измерений по `scaleId` в потокобезопасном словаре; глубина истории `HistoryDepth`.
+  - `AddSample(scale)` — добавляет точку и усечает старые записи.
+  - `GetSamples(scaleId, window)` — выдаёт точки за окно/глубину.
+
+- `MainForm` (`MainForm.cs`)
+  - Зависимости: `ScaleManager`, `WeightHistoryManager`, `CameraManager`, `ConfigStorage`, `MassaKClient`, `CameraOsdService`, `GlobalSettings`.
+  - Инициализация вкладок (весы, камеры, настройки, лог), таймеров UI/проверки соединения, загрузка конфигурации и создание клиентов опроса/OSD.
+  - Обработчики: добавление/удаление весов и камер, автопоиск, редактирование привязок, сохранение настроек; запускает/останавливает опрос, обновляет таблицы и лог.
+  - Управляет пересозданием `MassaKClient` и `CameraOsdService` при изменениях конфигурации и передаёт обновления статусов/истории на UI.
+
+- `ScaleEditForm` (`ScaleEditForm.cs`)
+  - Диалог создания/редактирования весов: ввод имени/IP/порта, валидация, заполнение объекта `Scale` и возврат `DialogResult.OK`.
+
+- `CameraEditForm` (`CameraEditForm.cs`)
+  - Диалог камеры: ввод имени, IP, порта, логина/пароля; проверки IP/порта/логина; сохраняет данные в объект `Camera`.
+
+- `WeightTrendForm` (`WeightTrendForm.cs`)
+  - Просмотр истории веса выбранных весов: выбор окна (5/10/30 минут или вся история), автообновление, построение серий «Net», «Tare», «Stable» на графике.
+
+Flows
+-----
+1. **Запуск приложения**: `Program.Main()` → `MainForm` конструктор → `InitializeComponents` формирует вкладки → создаются менеджеры и запускаются таймеры → `LoadConfigAsync` читает `config.json`, наполняет менеджеры, при необходимости запускает `MassaKClient` и `CameraOsdService`.
+2. **Опрос весов**: `MassaKClient.Start()` запускает для каждого `Scale` задачу `PollLoopAsync` → TCP подключение → отправка запроса → чтение/парсинг ответа → обновление `Scale.State` → событие `ScaleUpdated` уведомляет UI/OSD/историю → при ошибках лог и задержка `_reconnectDelay`.
+3. **Обновление OSD камер**: `CameraOsdService.Start()` создаёт `HikvisionOsdClient` на каждую камеру → `RunCameraLoopAsync` периодически определяет изменившиеся привязки/время keep-alive → строит текст (`BuildOverlayText`) и отправляет PUT на ISAPI → кэширует текст и обновляет статус (`CameraStatusChanged`). Ошибки помечают камеру офлайн и логируются.
+4. **Сохранение/загрузка конфигурации**: `ConfigStorage.Load()` читает `config.json` при старте; `ConfigStorage.CreateFromManagers()`/`Save()` вызываются после изменений (добавление весов/камер, сохранение настроек). `ApplyToManagers()` восстанавливает привязки между камерами и весами.
+5. **Редактирование и просмотр**: пользователь открывает `ScaleEditForm`/`CameraEditForm` для изменения сущностей; после сохранения `MainForm` пересоздаёт `MassaKClient` и `CameraOsdService`. `WeightTrendForm` отображает историю из `WeightHistoryManager` с автообновлением.
+

@@ -1,26 +1,29 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
+using Krypton.Toolkit;
 using MassaKWin.Core;
+using MassaKWin.Ui;
 
 namespace MassaKWin
 {
-    public partial class ScaleEditForm : Form
+    public partial class ScaleEditForm : KryptonForm
     {
-        private Label lblName;
-        private TextBox txtName;
-        private Label lblIp;
-        private TextBox txtIp;
-        private Label lblPort;
-        private TextBox txtPort;
-        private Button btnOk;
-        private Button btnCancel;
+        private Label lblName = null!;
+        private KryptonTextBox txtName = null!;
+        private Label lblIp = null!;
+        private KryptonTextBox txtIp = null!;
+        private Label lblPort = null!;
+        private KryptonTextBox txtPort = null!;
+        private KryptonButton btnOk = null!;
+        private KryptonButton btnCancel = null!;
 
         public new Scale Scale { get; private set; }
 
         public ScaleEditForm(Scale? scale = null)
         {
             InitializeComponent();
+            ThemeManager.Apply(this);
 
             if (scale != null)
             {
@@ -37,59 +40,68 @@ namespace MassaKWin
 
         private void InitializeComponent()
         {
-            lblName = new Label
-            {
-                Text = "Имя",
-                AutoSize = true,
-                Location = new Point(10, 15)
-            };
+            lblName = new Label { Text = "Имя", AutoSize = true, Anchor = AnchorStyles.Left };
+            txtName = new KryptonTextBox { Width = 200, Anchor = AnchorStyles.Left | AnchorStyles.Right };
 
-            txtName = new TextBox
-            {
-                Location = new Point(100, 12),
-                Width = 170
-            };
+            lblIp = new Label { Text = "IP", AutoSize = true, Anchor = AnchorStyles.Left };
+            txtIp = new KryptonTextBox { Width = 200, Anchor = AnchorStyles.Left | AnchorStyles.Right };
 
-            lblIp = new Label
-            {
-                Text = "IP",
-                AutoSize = true,
-                Location = new Point(10, 50)
-            };
+            lblPort = new Label { Text = "Порт", AutoSize = true, Anchor = AnchorStyles.Left };
+            txtPort = new KryptonTextBox { Width = 200, Anchor = AnchorStyles.Left | AnchorStyles.Right };
 
-            txtIp = new TextBox
-            {
-                Location = new Point(100, 47),
-                Width = 170
-            };
-
-            lblPort = new Label
-            {
-                Text = "Порт",
-                AutoSize = true,
-                Location = new Point(10, 85)
-            };
-
-            txtPort = new TextBox
-            {
-                Location = new Point(100, 82),
-                Width = 170
-            };
-
-            btnOk = new Button
+            btnOk = new KryptonButton
             {
                 Text = "ОК",
-                Location = new Point(100, 120),
-                DialogResult = DialogResult.None
+                DialogResult = DialogResult.None,
+                AutoSize = true,
+                MinimumSize = new Size(90, 32)
             };
             btnOk.Click += BtnOkOnClick;
 
-            btnCancel = new Button
+            btnCancel = new KryptonButton
             {
                 Text = "Отмена",
-                Location = new Point(190, 120)
+                AutoSize = true,
+                MinimumSize = new Size(90, 32)
             };
             btnCancel.Click += BtnCancelOnClick;
+
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 4,
+                Padding = new Padding(12),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            layout.Controls.Add(lblName, 0, 0);
+            layout.Controls.Add(txtName, 1, 0);
+            layout.Controls.Add(lblIp, 0, 1);
+            layout.Controls.Add(txtIp, 1, 1);
+            layout.Controls.Add(lblPort, 0, 2);
+            layout.Controls.Add(txtPort, 1, 2);
+
+            var buttonsPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.RightToLeft,
+                AutoSize = true,
+                Dock = DockStyle.Top,
+                Padding = new Padding(0, 12, 0, 0)
+            };
+            buttonsPanel.Controls.Add(btnCancel);
+            buttonsPanel.Controls.Add(btnOk);
+
+            layout.Controls.Add(buttonsPanel, 0, 3);
+            layout.SetColumnSpan(buttonsPanel, 2);
 
             AcceptButton = btnOk;
             CancelButton = btnCancel;
@@ -97,17 +109,10 @@ namespace MassaKWin
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
-            ClientSize = new Size(290, 170);
+            ClientSize = new Size(340, 190);
             Text = "Весы";
 
-            Controls.Add(lblName);
-            Controls.Add(txtName);
-            Controls.Add(lblIp);
-            Controls.Add(txtIp);
-            Controls.Add(lblPort);
-            Controls.Add(txtPort);
-            Controls.Add(btnOk);
-            Controls.Add(btnCancel);
+            Controls.Add(layout);
         }
 
         private void BtnOkOnClick(object? sender, EventArgs e)

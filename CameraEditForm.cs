@@ -1,24 +1,28 @@
 using System;
+using System.Drawing;
 using System.Windows.Forms;
+using Krypton.Toolkit;
 using MassaKWin.Core;
+using MassaKWin.Ui;
 
 namespace MassaKWin
 {
-    public partial class CameraEditForm : Form
+    public partial class CameraEditForm : KryptonForm
     {
-        private TextBox _nameTextBox;
-        private TextBox _ipTextBox;
-        private TextBox _portTextBox;
-        private TextBox _usernameTextBox;
-        private TextBox _passwordTextBox;
-        private Button _okButton;
-        private Button _cancelButton;
+        private KryptonTextBox _nameTextBox = null!;
+        private KryptonTextBox _ipTextBox = null!;
+        private KryptonTextBox _portTextBox = null!;
+        private KryptonTextBox _usernameTextBox = null!;
+        private KryptonTextBox _passwordTextBox = null!;
+        private KryptonButton _okButton = null!;
+        private KryptonButton _cancelButton = null!;
 
         public MassaKWin.Core.Camera Camera { get; private set; }
 
         public CameraEditForm(MassaKWin.Core.Camera? camera = null)
         {
             InitializeComponent();
+            ThemeManager.Apply(this);
 
             if (camera != null)
             {
@@ -37,95 +41,64 @@ namespace MassaKWin
 
         private void InitializeComponent()
         {
-            _nameTextBox = new TextBox();
-            _ipTextBox = new TextBox();
-            _portTextBox = new TextBox();
-            _usernameTextBox = new TextBox();
-            _passwordTextBox = new TextBox();
-            _okButton = new Button();
-            _cancelButton = new Button();
+            _nameTextBox = new KryptonTextBox { Anchor = AnchorStyles.Left | AnchorStyles.Right };
+            _ipTextBox = new KryptonTextBox { Anchor = AnchorStyles.Left | AnchorStyles.Right };
+            _portTextBox = new KryptonTextBox { Anchor = AnchorStyles.Left | AnchorStyles.Right };
+            _usernameTextBox = new KryptonTextBox { Anchor = AnchorStyles.Left | AnchorStyles.Right };
+            _passwordTextBox = new KryptonTextBox { Anchor = AnchorStyles.Left | AnchorStyles.Right, PasswordChar = '•' };
+            _okButton = new KryptonButton { Text = "ОК", AutoSize = true, MinimumSize = new Size(90, 32) };
+            _cancelButton = new KryptonButton { Text = "Отмена", AutoSize = true, MinimumSize = new Size(90, 32) };
 
-            SuspendLayout();
+            _okButton.Click += OkButton_Click;
+            _cancelButton.Click += CancelButton_Click;
+
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                Padding = new Padding(12),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+
+            string[] labels = { "Имя:", "IP:", "Порт:", "Логин:", "Пароль:" };
+            Control[] controls = { _nameTextBox, _ipTextBox, _portTextBox, _usernameTextBox, _passwordTextBox };
+
+            for (int i = 0; i < labels.Length; i++)
+            {
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                var lbl = new Label { Text = labels[i], AutoSize = true, Anchor = AnchorStyles.Left };
+                layout.Controls.Add(lbl, 0, i);
+                layout.Controls.Add(controls[i], 1, i);
+            }
+
+            var buttonsPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.RightToLeft,
+                AutoSize = true,
+                Dock = DockStyle.Top,
+                Padding = new Padding(0, 12, 0, 0)
+            };
+            buttonsPanel.Controls.Add(_cancelButton);
+            buttonsPanel.Controls.Add(_okButton);
+
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.Controls.Add(buttonsPanel, 0, labels.Length);
+            layout.SetColumnSpan(buttonsPanel, 2);
 
             Text = "Камера";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new System.Drawing.Size(300, 250);
-
-            var nameLabel = new Label
-            {
-                Text = "Имя:",
-                Location = new System.Drawing.Point(10, 15),
-                AutoSize = true
-            };
-            _nameTextBox.Location = new System.Drawing.Point(110, 12);
-            _nameTextBox.Width = 170;
-
-            var ipLabel = new Label
-            {
-                Text = "IP:",
-                Location = new System.Drawing.Point(10, 50),
-                AutoSize = true
-            };
-            _ipTextBox.Location = new System.Drawing.Point(110, 47);
-            _ipTextBox.Width = 170;
-
-            var portLabel = new Label
-            {
-                Text = "Порт:",
-                Location = new System.Drawing.Point(10, 85),
-                AutoSize = true
-            };
-            _portTextBox.Location = new System.Drawing.Point(110, 82);
-            _portTextBox.Width = 170;
-
-            var usernameLabel = new Label
-            {
-                Text = "Логин:",
-                Location = new System.Drawing.Point(10, 120),
-                AutoSize = true
-            };
-            _usernameTextBox.Location = new System.Drawing.Point(110, 117);
-            _usernameTextBox.Width = 170;
-
-            var passwordLabel = new Label
-            {
-                Text = "Пароль:",
-                Location = new System.Drawing.Point(10, 155),
-                AutoSize = true
-            };
-            _passwordTextBox.Location = new System.Drawing.Point(110, 152);
-            _passwordTextBox.Width = 170;
-            _passwordTextBox.PasswordChar = '•';
-
-            _okButton.Text = "ОК";
-            _okButton.Location = new System.Drawing.Point(110, 195);
-            _okButton.Click += OkButton_Click;
-
-            _cancelButton.Text = "Отмена";
-            _cancelButton.Location = new System.Drawing.Point(200, 195);
-            _cancelButton.Click += CancelButton_Click;
+            ClientSize = new Size(360, 260);
 
             AcceptButton = _okButton;
             CancelButton = _cancelButton;
 
-            Controls.Add(nameLabel);
-            Controls.Add(_nameTextBox);
-            Controls.Add(ipLabel);
-            Controls.Add(_ipTextBox);
-            Controls.Add(portLabel);
-            Controls.Add(_portTextBox);
-            Controls.Add(usernameLabel);
-            Controls.Add(_usernameTextBox);
-            Controls.Add(passwordLabel);
-            Controls.Add(_passwordTextBox);
-            Controls.Add(_okButton);
-            Controls.Add(_cancelButton);
-
-            ResumeLayout(false);
-            PerformLayout();
+            Controls.Add(layout);
         }
 
         private void OkButton_Click(object? sender, EventArgs e)

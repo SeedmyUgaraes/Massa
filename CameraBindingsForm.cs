@@ -1,20 +1,23 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Krypton.Toolkit;
 using MassaKWin.Core;
+using MassaKWin.Ui;
 
 namespace MassaKWin
 {
-    public partial class CameraBindingsForm : Form
+    public partial class CameraBindingsForm : KryptonForm
     {
         private readonly Camera _camera;
         private readonly ScaleManager _scaleManager;
         private DataGridView _dgvBindings = null!;
-        private Button _btnOk = null!;
-        private Button _btnCancel = null!;
+        private KryptonButton _btnOk = null!;
+        private KryptonButton _btnCancel = null!;
 
         public CameraBindingsForm(Camera camera, ScaleManager scaleManager)
         {
@@ -22,6 +25,7 @@ namespace MassaKWin
             _scaleManager = scaleManager;
 
             InitializeComponent();
+            ThemeManager.Apply(this);
             FillBindings();
         }
 
@@ -185,27 +189,38 @@ namespace MassaKWin
         private void InitializeComponent()
         {
             _dgvBindings = new DataGridView();
-            _btnOk = new Button();
-            _btnCancel = new Button();
-            var buttonsPanel = new Panel();
+            _btnOk = new KryptonButton();
+            _btnCancel = new KryptonButton();
 
             SuspendLayout();
 
-            // --- Форма ---
             Text = "Привязки весов";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
             MinimizeBox = false;
-            ClientSize = new System.Drawing.Size(500, 300);
+            ClientSize = new System.Drawing.Size(520, 340);
+            Padding = new Padding(8);
 
-            // --- Таблица ---
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink
+            };
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
             _dgvBindings.AllowUserToAddRows = false;
             _dgvBindings.AllowUserToDeleteRows = false;
             _dgvBindings.RowHeadersVisible = false;
             _dgvBindings.Dock = DockStyle.Fill;
             _dgvBindings.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             _dgvBindings.MultiSelect = false;
+            _dgvBindings.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            StyleBindingsGrid();
 
             var enabledColumn = new DataGridViewCheckBoxColumn
             {
@@ -231,35 +246,52 @@ namespace MassaKWin
 
             _dgvBindings.Columns.AddRange(enabledColumn, scaleNameColumn, overlayIdColumn);
 
-            // --- Панель с кнопками ---
-            buttonsPanel.Dock = DockStyle.Bottom;
-            buttonsPanel.Height = 50;
-            buttonsPanel.Padding = new Padding(10);
+            var buttonsPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.RightToLeft,
+                AutoSize = true,
+                Dock = DockStyle.Fill,
+                Padding = new Padding(0, 10, 0, 0)
+            };
 
-            // Кнопка "Сохранить"
             _btnOk.Text = "Сохранить";
-            _btnOk.Size = new System.Drawing.Size(90, 23);
-            _btnOk.Location = new System.Drawing.Point(10, 10);
-            _btnOk.Anchor = AnchorStyles.Left | AnchorStyles.Top;
+            _btnOk.AutoSize = true;
+            _btnOk.MinimumSize = new System.Drawing.Size(100, 32);
             _btnOk.Click += OnOkClicked;
 
-            // Кнопка "Отмена"
             _btnCancel.Text = "Отмена";
-            _btnCancel.Size = new System.Drawing.Size(90, 23);
-            _btnCancel.Location = new System.Drawing.Point(110, 10);
-            _btnCancel.Anchor = AnchorStyles.Left | AnchorStyles.Top;
+            _btnCancel.AutoSize = true;
+            _btnCancel.MinimumSize = new System.Drawing.Size(100, 32);
             _btnCancel.Click += OnCancelClicked;
 
-            buttonsPanel.Controls.Add(_btnOk);
             buttonsPanel.Controls.Add(_btnCancel);
+            buttonsPanel.Controls.Add(_btnOk);
 
             AcceptButton = _btnOk;
             CancelButton = _btnCancel;
 
-            Controls.Add(_dgvBindings);
-            Controls.Add(buttonsPanel);
+            layout.Controls.Add(_dgvBindings, 0, 0);
+            layout.Controls.Add(buttonsPanel, 0, 1);
+
+            Controls.Add(layout);
 
             ResumeLayout(false);
+        }
+
+        private void StyleBindingsGrid()
+        {
+            _dgvBindings.BackgroundColor = System.Drawing.Color.White;
+            _dgvBindings.BorderStyle = BorderStyle.None;
+            _dgvBindings.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+            _dgvBindings.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
+            _dgvBindings.ColumnHeadersDefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(245, 247, 250);
+            _dgvBindings.ColumnHeadersDefaultCellStyle.Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold);
+            _dgvBindings.RowTemplate.Height = 28;
+            _dgvBindings.DefaultCellStyle.SelectionBackColor = System.Drawing.Color.FromArgb(227, 235, 250);
+            _dgvBindings.DefaultCellStyle.SelectionForeColor = System.Drawing.Color.Black;
+
+            var prop = typeof(DataGridView).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            prop?.SetValue(_dgvBindings, true);
         }
 
     }

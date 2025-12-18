@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -6,19 +7,22 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Reflection;
+using Krypton.Toolkit;
 using MassaKWin.Core;
+using MassaKWin.Ui;
 
 namespace MassaKWin
 {
-    public partial class ScaleDiscoveryForm : Form
+    public partial class ScaleDiscoveryForm : KryptonForm
     {
         private readonly ScaleManager _scaleManager;
 
-        private TextBox _txtFromIp = null!;
-        private TextBox _txtToIp = null!;
-        private Button _btnScan = null!;
-        private Button _btnStop = null!;
-        private Button _btnAddSelected = null!;
+        private KryptonTextBox _txtFromIp = null!;
+        private KryptonTextBox _txtToIp = null!;
+        private KryptonButton _btnScan = null!;
+        private KryptonButton _btnStop = null!;
+        private KryptonButton _btnAddSelected = null!;
         private DataGridView _dgvResults = null!;
         private ProgressBar _progressBar = null!;
         private Label _lblStatus = null!;
@@ -38,6 +42,7 @@ namespace MassaKWin
             _connectTimeoutMs = settings.ScanIpTimeoutMs;
             _parallelConnections = Math.Max(1, settings.ScanParallelConnections);
             InitializeComponent();
+            ThemeManager.Apply(this);
         }
 
         #region UI
@@ -49,75 +54,69 @@ namespace MassaKWin
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
             MinimizeBox = false;
-            ClientSize = new System.Drawing.Size(720, 420);
+            ClientSize = new System.Drawing.Size(760, 460);
+            Padding = new Padding(8);
 
-            var panelTop = new Panel
+            var root = new TableLayoutPanel
             {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink
+            };
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            var header = new TableLayoutPanel
+            {
+                ColumnCount = 5,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 Dock = DockStyle.Top,
-                Height = 60,
-                Padding = new Padding(10)
+                Padding = new Padding(8),
+                Margin = new Padding(0, 0, 0, 8)
             };
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 
-            var lblFrom = new Label
-            {
-                Text = "IP от:",
-                AutoSize = true,
-                Location = new System.Drawing.Point(10, 12)
-            };
+            var lblFrom = new Label { Text = "IP от:", AutoSize = true, Anchor = AnchorStyles.Left };
+            _txtFromIp = new KryptonTextBox { Width = 140, Text = _settings.AutoDiscoveryIpStart, Anchor = AnchorStyles.Left };
+            var lblTo = new Label { Text = "IP до:", AutoSize = true, Anchor = AnchorStyles.Left };
+            _txtToIp = new KryptonTextBox { Width = 140, Text = _settings.AutoDiscoveryIpEnd, Anchor = AnchorStyles.Left };
 
-            _txtFromIp = new TextBox
-            {
-                Location = new System.Drawing.Point(60, 9),
-                Width = 140,
-                Text = _settings.AutoDiscoveryIpStart
-            };
-
-            var lblTo = new Label
-            {
-                Text = "IP до:",
-                AutoSize = true,
-                Location = new System.Drawing.Point(220, 12)
-            };
-
-            _txtToIp = new TextBox
-            {
-                Location = new System.Drawing.Point(270, 9),
-                Width = 140,
-                Text = _settings.AutoDiscoveryIpEnd
-            };
-
-            _btnScan = new Button
-            {
-                Text = "Сканировать",
-                Location = new System.Drawing.Point(430, 7),
-                Width = 110
-            };
+            _btnScan = new KryptonButton { Text = "Сканировать", AutoSize = true, MinimumSize = new Size(120, 34) };
             _btnScan.Click += OnScanClicked;
-
-            _btnStop = new Button
-            {
-                Text = "Стоп",
-                Location = new System.Drawing.Point(550, 7),
-                Width = 80,
-                Enabled = false
-            };
+            _btnStop = new KryptonButton { Text = "Стоп", AutoSize = true, MinimumSize = new Size(90, 34), Enabled = false };
             _btnStop.Click += OnStopClicked;
 
-            panelTop.Controls.Add(lblFrom);
-            panelTop.Controls.Add(_txtFromIp);
-            panelTop.Controls.Add(lblTo);
-            panelTop.Controls.Add(_txtToIp);
-            panelTop.Controls.Add(_btnScan);
-            panelTop.Controls.Add(_btnStop);
+            var buttonsPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                Anchor = AnchorStyles.Right
+            };
+            buttonsPanel.Controls.Add(_btnScan);
+            buttonsPanel.Controls.Add(_btnStop);
+
+            header.Controls.Add(lblFrom, 0, 0);
+            header.Controls.Add(_txtFromIp, 1, 0);
+            header.Controls.Add(lblTo, 2, 0);
+            header.Controls.Add(_txtToIp, 3, 0);
+            header.Controls.Add(buttonsPanel, 4, 0);
 
             _dgvResults = new DataGridView
             {
                 Dock = DockStyle.Fill,
-                AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
-                RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                MultiSelect = false
+                MultiSelect = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false
             };
 
             var colSelected = new DataGridViewCheckBoxColumn
@@ -156,43 +155,79 @@ namespace MassaKWin
             };
 
             _dgvResults.Columns.AddRange(colSelected, colIp, colPort, colName, colStatus);
+            StyleResultsGrid();
 
-            var panelBottom = new Panel
+            var footer = new TableLayoutPanel
             {
-                Dock = DockStyle.Bottom,
-                Height = 70,
-                Padding = new Padding(10)
+                ColumnCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Fill,
+                Padding = new Padding(8, 8, 8, 0)
+            };
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            var statusPanel = new TableLayoutPanel
+            {
+                ColumnCount = 1,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Fill
             };
 
             _progressBar = new ProgressBar
             {
                 Dock = DockStyle.Top,
-                Height = 18
+                Height = 18,
+                Margin = new Padding(0, 0, 0, 6)
             };
 
             _lblStatus = new Label
             {
-                Dock = DockStyle.Top,
-                Height = 18,
-                TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
                 Text = "Готово."
             };
 
-            _btnAddSelected = new Button
+            statusPanel.Controls.Add(_progressBar, 0, 0);
+            statusPanel.Controls.Add(_lblStatus, 0, 1);
+
+            _btnAddSelected = new KryptonButton
             {
                 Text = "Добавить выделенные в весы",
-                Dock = DockStyle.Right,
-                Width = 220
+                AutoSize = true,
+                MinimumSize = new Size(240, 34),
+                Anchor = AnchorStyles.Right
             };
             _btnAddSelected.Click += OnAddSelectedClicked;
 
-            panelBottom.Controls.Add(_btnAddSelected);
-            panelBottom.Controls.Add(_lblStatus);
-            panelBottom.Controls.Add(_progressBar);
+            footer.Controls.Add(statusPanel, 0, 0);
+            footer.Controls.Add(_btnAddSelected, 1, 0);
 
-            Controls.Add(_dgvResults);
-            Controls.Add(panelBottom);
-            Controls.Add(panelTop);
+            root.Controls.Add(header, 0, 0);
+            root.Controls.Add(_dgvResults, 0, 1);
+            root.Controls.Add(footer, 0, 2);
+
+            Controls.Add(root);
+        }
+
+        private void StyleResultsGrid()
+        {
+            _dgvResults.RowHeadersVisible = false;
+            _dgvResults.BackgroundColor = Color.White;
+            _dgvResults.BorderStyle = BorderStyle.None;
+            _dgvResults.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+            _dgvResults.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
+            _dgvResults.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(245, 247, 250);
+            _dgvResults.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(50, 50, 50);
+            _dgvResults.ColumnHeadersDefaultCellStyle.Font = new Font(Font, FontStyle.Bold);
+            _dgvResults.DefaultCellStyle.SelectionBackColor = Color.FromArgb(227, 235, 250);
+            _dgvResults.DefaultCellStyle.SelectionForeColor = Color.Black;
+            _dgvResults.RowTemplate.Height = 28;
+
+            var prop = typeof(DataGridView).GetProperty("DoubleBuffered", BindingFlags.Instance | BindingFlags.NonPublic);
+            prop?.SetValue(_dgvResults, true);
         }
 
         #endregion

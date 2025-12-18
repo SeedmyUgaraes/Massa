@@ -3,7 +3,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using Krypton.Toolkit;
 using MassaKWin.Core;
-using MassaKWin.Ui;
+using ThemeManager = MassaKWin.Ui.ThemeManager;
 
 namespace MassaKWin
 {

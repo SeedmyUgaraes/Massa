@@ -5,8 +5,8 @@ using System.Windows.Forms;
 using System.Windows.Forms.DataVisualization.Charting;
 using Krypton.Toolkit;
 using MassaKWin.Core;
-using MassaKWin.Ui;
 using Timer = System.Windows.Forms.Timer;
+using ThemeManager = MassaKWin.Ui.ThemeManager;
 
 namespace MassaKWin
 {

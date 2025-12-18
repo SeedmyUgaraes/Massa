@@ -10,7 +10,7 @@ using System.Windows.Forms;
 using System.Reflection;
 using Krypton.Toolkit;
 using MassaKWin.Core;
-using MassaKWin.Ui;
+using ThemeManager = MassaKWin.Ui.ThemeManager;
 
 namespace MassaKWin
 {

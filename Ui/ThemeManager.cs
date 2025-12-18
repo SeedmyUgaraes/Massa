@@ -37,8 +37,6 @@ namespace MassaKWin.Ui
 
             _palette.Common.StateCommon.Content.ShortText.Font = DefaultFont;
             _palette.Common.StateCommon.Content.ShortText.Color1 = Color.FromArgb(40, 40, 40);
-            _palette.Common.StateCommon.Content.Font = DefaultFont;
-            _palette.Common.StateCommon.Content.Color1 = Color.FromArgb(40, 40, 40);
             _palette.FormStyles.FormMain.StateCommon.Back.Color1 = Color.White;
             _palette.FormStyles.FormMain.StateCommon.Back.Color2 = Color.White;
 

@@ -1,17 +1,21 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
-using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Krypton.Toolkit;
 using MassaKWin.Core;
+using MassaKWin.Ui;
 using Timer = System.Windows.Forms.Timer;
 
 namespace MassaKWin
 {
-    public class MainForm : Form
+    public class MainForm : KryptonForm
     {
         private readonly ScaleManager _scaleManager;
         private readonly WeightHistoryManager _historyManager;
@@ -38,34 +42,34 @@ namespace MassaKWin
 
         private DataGridView dgvScales;
         private DataGridView dgvCameras;
-        private TextBox txtLog;
-        private Button _btnAddScale;
-        private Button _btnDeleteScale;
-        private Button _btnAutoDiscoverScales = null!;
-        private Button _btnStartPolling = null!;
-        private Button _btnStopPolling = null!;
-        private Button _btnAddCamera;
-        private Button _btnDeleteCamera;
-        private Button _btnEditBindings;
-        private CheckBox _chkStartPollingOnStartup = null!;
+        private KryptonRichTextBox txtLog;
+        private KryptonButton _btnAddScale;
+        private KryptonButton _btnDeleteScale;
+        private KryptonButton _btnAutoDiscoverScales = null!;
+        private KryptonButton _btnStartPolling = null!;
+        private KryptonButton _btnStopPolling = null!;
+        private KryptonButton _btnAddCamera;
+        private KryptonButton _btnDeleteCamera;
+        private KryptonButton _btnEditBindings;
+        private KryptonCheckBox _chkStartPollingOnStartup = null!;
         private NumericUpDown _numScaleTimeout = null!;
         private NumericUpDown _numDeadband = null!;
-        private ComboBox _cbWeightUnit = null!;
+        private KryptonComboBox _cbWeightUnit = null!;
         private NumericUpDown _numWeightDecimals = null!;
-        private CheckBox _chkAutoZeroOnConnect = null!;
-        private TextBox _txtDiscoveryFrom = null!;
-        private TextBox _txtDiscoveryTo = null!;
+        private KryptonCheckBox _chkAutoZeroOnConnect = null!;
+        private KryptonTextBox _txtDiscoveryFrom = null!;
+        private KryptonTextBox _txtDiscoveryTo = null!;
         private NumericUpDown _numDefaultPort = null!;
         private NumericUpDown _numParallelScan = null!;
         private NumericUpDown _numScanTimeout = null!;
-        private TextBox _txtOverlayTemplate = null!;
-        private TextBox _txtOverlayNoConnection = null!;
-        private TextBox _txtOverlayUnstable = null!;
-        private ComboBox _cbOverlayPosition = null!;
-        private TextBox _txtLogDirectory = null!;
-        private Button _btnBrowseLogDirectory = null!;
-        private CheckBox _chkEnableSounds = null!;
-        private Button _btnSaveSettings = null!;
+        private KryptonTextBox _txtOverlayTemplate = null!;
+        private KryptonTextBox _txtOverlayNoConnection = null!;
+        private KryptonTextBox _txtOverlayUnstable = null!;
+        private KryptonComboBox _cbOverlayPosition = null!;
+        private KryptonTextBox _txtLogDirectory = null!;
+        private KryptonButton _btnBrowseLogDirectory = null!;
+        private KryptonCheckBox _chkEnableSounds = null!;
+        private KryptonButton _btnSaveSettings = null!;
         private async void OnAddScaleClicked(object? sender, EventArgs e)
         {
             // Окно добавления/редактирования весов
@@ -143,13 +147,14 @@ namespace MassaKWin
         {
             tabControl = new TabControl
             {
-                Dock = DockStyle.Fill
+                Dock = DockStyle.Fill,
+                Padding = new Point(12, 4)
             };
 
-            tabScales = new TabPage("Весы");
-            tabCameras = new TabPage("Камеры");
-            tabSettings = new TabPage("Настройки");
-            tabLog = new TabPage("Лог");
+            tabScales = new TabPage("Весы") { Padding = new Padding(8) };
+            tabCameras = new TabPage("Камеры") { Padding = new Padding(8) };
+            tabSettings = new TabPage("Настройки") { Padding = new Padding(8), AutoScroll = true };
+            tabLog = new TabPage("Лог") { Padding = new Padding(8) };
 
             tabControl.TabPages.Add(tabScales);
             tabControl.TabPages.Add(tabCameras);
@@ -162,20 +167,12 @@ namespace MassaKWin
             InitializeLogTab();
 
             Controls.Add(tabControl);
+            ThemeManager.Apply(this);
         }
 
         private void InitializeScalesTab()
         {
-            dgvScales = new DataGridView
-            {
-                Dock = DockStyle.Fill,
-                ReadOnly = true,
-                AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect
-            };
-
+            dgvScales = CreateStyledGrid();
             dgvScales.CellDoubleClick += DgvScales_CellDoubleClick;
 
             dgvScales.Columns.Add("Name", "Имя");
@@ -188,39 +185,23 @@ namespace MassaKWin
             // Колонка с текстовым статусом и временем нахождения в состоянии
             dgvScales.Columns.Add("Status", "Статус");
 
-            // TODO: привязать к ScaleManager и заполнить источником данных
-
-            _btnAddScale = new Button
-            {
-                Text = "Добавить весы",
-                Height = 35
-            };
-            _btnAddScale.Click += OnAddScaleClicked;
-
-            _btnDeleteScale = new Button
-            {
-                Text = "Удалить весы",
-                Height = 35
-            };
-            _btnDeleteScale.Click += OnDeleteScaleClicked;
-
-            _btnAutoDiscoverScales = new Button
-            {
-                Text = "Автопоиск",
-                Height = 35
-            };
-            _btnAutoDiscoverScales.Click += OnAutoDiscoverScalesClicked;
+            _btnAddScale = CreateActionButton("Добавить весы", OnAddScaleClicked);
+            _btnDeleteScale = CreateActionButton("Удалить весы", OnDeleteScaleClicked);
+            _btnAutoDiscoverScales = CreateActionButton("Автопоиск", OnAutoDiscoverScalesClicked);
 
             var scalesPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 40,
+                Height = 52,
                 FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false
+                WrapContents = false,
+                Padding = new Padding(8, 8, 8, 4),
+                BackColor = Color.FromArgb(245, 247, 250)
             };
-            scalesPanel.Controls.Add(_btnAddScale);
-            scalesPanel.Controls.Add(_btnDeleteScale);
-            scalesPanel.Controls.Add(_btnAutoDiscoverScales);
+            scalesPanel.Controls.AddRange(new Control[]
+            {
+                _btnAddScale, _btnDeleteScale, _btnAutoDiscoverScales
+            });
 
             tabScales.Controls.Add(dgvScales);
             tabScales.Controls.Add(scalesPanel);
@@ -228,52 +209,30 @@ namespace MassaKWin
 
         private void InitializeCamerasTab()
         {
-            dgvCameras = new DataGridView
-            {
-                Dock = DockStyle.Fill,
-                ReadOnly = true,
-                AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect
-            };
+            dgvCameras = CreateStyledGrid();
 
             dgvCameras.Columns.Add("Name", "Имя камеры");
             dgvCameras.Columns.Add("IpPort", "IP:Port");
             dgvCameras.Columns.Add("Bindings", "Привязок весов");
             dgvCameras.Columns.Add("OsdStatus", "Статус OSD");
 
-            _btnAddCamera = new Button
-            {
-                Text = "Добавить камеру",
-                Height = 35
-            };
-            _btnAddCamera.Click += OnAddCameraClicked;
-
-            _btnDeleteCamera = new Button
-            {
-                Text = "Удалить камеру",
-                Height = 35
-            };
-            _btnDeleteCamera.Click += OnDeleteCameraClicked;
-
-            _btnEditBindings = new Button
-            {
-                Text = "Привязки…",
-                Height = 35
-            };
-            _btnEditBindings.Click += OnEditBindingsClicked;
+            _btnAddCamera = CreateActionButton("Добавить камеру", OnAddCameraClicked);
+            _btnDeleteCamera = CreateActionButton("Удалить камеру", OnDeleteCameraClicked);
+            _btnEditBindings = CreateActionButton("Привязки…", OnEditBindingsClicked);
 
             var camerasPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 40,
+                Height = 52,
                 FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false
+                WrapContents = false,
+                Padding = new Padding(8, 8, 8, 4),
+                BackColor = Color.FromArgb(245, 247, 250)
             };
-            camerasPanel.Controls.Add(_btnAddCamera);
-            camerasPanel.Controls.Add(_btnDeleteCamera);
-            camerasPanel.Controls.Add(_btnEditBindings);
+            camerasPanel.Controls.AddRange(new Control[]
+            {
+                _btnAddCamera, _btnDeleteCamera, _btnEditBindings
+            });
 
             tabCameras.Controls.Add(dgvCameras);
             tabCameras.Controls.Add(camerasPanel);
@@ -281,58 +240,169 @@ namespace MassaKWin
 
         private void InitializeSettingsTab()
         {
-            var panel = new TableLayoutPanel
+            var scrollPanel = new Panel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 6,
                 AutoScroll = true
             };
 
-            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                Padding = new Padding(8)
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 
-            panel.Controls.Add(CreatePollingGroup(), 0, 0);
-            panel.Controls.Add(CreateDiscoveryGroup(), 0, 1);
-            panel.Controls.Add(CreateOverlayGroup(), 0, 2);
-            panel.Controls.Add(CreateLoggingGroup(), 0, 3);
-            panel.Controls.Add(CreateNotificationsGroup(), 0, 4);
+            layout.Controls.Add(CreatePollingGroup(), 0, 0);
+            layout.Controls.Add(CreateDiscoveryGroup(), 0, 1);
+            layout.Controls.Add(CreateOverlayGroup(), 0, 2);
+            layout.Controls.Add(CreateLoggingGroup(), 0, 3);
+            layout.Controls.Add(CreateNotificationsGroup(), 0, 4);
 
             var bottomPanel = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.RightToLeft,
                 Dock = DockStyle.Top,
-                Height = 45
+                AutoSize = true,
+                Padding = new Padding(0, 8, 0, 0)
             };
 
-            _btnSaveSettings = new Button
+            _btnSaveSettings = new KryptonButton
             {
                 Text = "Сохранить настройки",
-                AutoSize = true
+                AutoSize = true,
+                MinimumSize = new Size(180, 34)
             };
             _btnSaveSettings.Click += async (_, _) => await SaveSettingsAsync();
 
             bottomPanel.Controls.Add(_btnSaveSettings);
 
-            panel.Controls.Add(bottomPanel, 0, 5);
+            layout.Controls.Add(bottomPanel, 0, 5);
 
-            tabSettings.Controls.Add(panel);
+            scrollPanel.Controls.Add(layout);
+            tabSettings.Controls.Add(scrollPanel);
         }
 
         private void InitializeLogTab()
         {
-            txtLog = new TextBox
+            txtLog = new KryptonRichTextBox
             {
                 Dock = DockStyle.Fill,
-                Multiline = true,
                 ReadOnly = true,
-                ScrollBars = ScrollBars.Vertical
+                HideSelection = false,
+                ScrollBars = RichTextBoxScrollBars.Vertical,
+                StateCommon =
+                {
+                    Border = { DrawBorders = PaletteDrawBorders.All, Rounding = 6 }
+                }
             };
             tabLog.Controls.Add(txtLog);
+        }
+
+        private KryptonButton CreateActionButton(string text, EventHandler onClick)
+        {
+            var button = new KryptonButton
+            {
+                Text = text,
+                AutoSize = true,
+                MinimumSize = new Size(140, 32),
+                Margin = new Padding(0, 0, 8, 0)
+            };
+            button.Click += onClick;
+            return button;
+        }
+
+        private DataGridView CreateStyledGrid()
+        {
+            var grid = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                RowHeadersVisible = false,
+                BackgroundColor = Color.White,
+                BorderStyle = BorderStyle.None,
+                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+                ColumnHeadersHeight = 34
+            };
+
+            grid.EnableHeadersVisualStyles = false;
+            grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(245, 247, 250);
+            grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(50, 50, 50);
+            grid.ColumnHeadersDefaultCellStyle.Font = new Font(Font, FontStyle.Bold);
+            grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
+            grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(227, 235, 250);
+            grid.DefaultCellStyle.SelectionForeColor = Color.Black;
+            grid.DefaultCellStyle.Font = Font;
+            grid.RowTemplate.Height = 30;
+            grid.GridColor = Color.FromArgb(230, 234, 240);
+            grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(249, 251, 255);
+
+            EnableDoubleBuffering(grid);
+            return grid;
+        }
+
+        private static void EnableDoubleBuffering(DataGridView grid)
+        {
+            var property = typeof(DataGridView).GetProperty("DoubleBuffered", BindingFlags.Instance | BindingFlags.NonPublic);
+            property?.SetValue(grid, true, null);
+        }
+
+        private void ApplyScaleRowStyle(DataGridViewRow row, bool online, bool stable)
+        {
+            var onlineColor = online ? Color.FromArgb(0, 128, 96) : Color.FromArgb(204, 52, 44);
+            var stableColor = stable ? Color.FromArgb(0, 128, 0) : Color.FromArgb(205, 92, 0);
+            row.DefaultCellStyle.BackColor = online ? Color.White : Color.FromArgb(255, 245, 245);
+            row.DefaultCellStyle.ForeColor = online ? Color.FromArgb(40, 40, 40) : Color.FromArgb(160, 40, 40);
+
+            if (row.Cells["Online"] is DataGridViewCell onlineCell)
+                onlineCell.Style.ForeColor = onlineColor;
+
+            if (row.Cells["Stable"] is DataGridViewCell stableCell)
+                stableCell.Style.ForeColor = stableColor;
+        }
+
+        private static TableLayoutPanel CreateTwoColumnLayout()
+        {
+            var layout = new TableLayoutPanel
+            {
+                ColumnCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Top,
+                GrowStyle = TableLayoutPanelGrowStyle.AddRows
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45f));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55f));
+            return layout;
+        }
+
+        private static Label CreateLabel(string text)
+        {
+            return new Label
+            {
+                Text = text,
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0, 0, 8, 8)
+            };
+        }
+
+        private static void AddRow(TableLayoutPanel layout, Control label, Control control)
+        {
+            var rowIndex = layout.RowCount++;
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            label.Margin = new Padding(label.Margin.Left, label.Margin.Top, label.Margin.Right, 8);
+            control.Margin = new Padding(control.Margin.Left, control.Margin.Top, control.Margin.Right, 8);
+            control.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+            layout.Controls.Add(label, 0, rowIndex);
+            layout.Controls.Add(control, 1, rowIndex);
         }
 
         private GroupBox CreatePollingGroup()
@@ -341,32 +411,31 @@ namespace MassaKWin
             {
                 Text = "Опрос весов",
                 Dock = DockStyle.Top,
-                Padding = new Padding(10),
-
+                Padding = new Padding(16),
                 AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = new Padding(0, 0, 0, 16)
             };
 
-            _chkStartPollingOnStartup = new CheckBox
+            var layout = CreateTwoColumnLayout();
+
+            _chkStartPollingOnStartup = new KryptonCheckBox
             {
                 Text = "Стартовать опрос при запуске",
                 AutoSize = true,
-                Dock = DockStyle.Top
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0, 0, 0, 8)
             };
+            AddRow(layout, new Label(), _chkStartPollingOnStartup);
 
             _numScaleTimeout = new NumericUpDown
             {
                 Minimum = 100,
                 Maximum = 60000,
                 Increment = 100,
-                Dock = DockStyle.Top
+                Anchor = AnchorStyles.Left | AnchorStyles.Right
             };
-            var lblTimeout = new Label
-            {
-                Text = "Таймаут ответа весов, мс",
-                Dock = DockStyle.Top,
-                AutoSize = true
-            };
+            AddRow(layout, CreateLabel("Таймаут ответа весов, мс"), _numScaleTimeout);
 
             _numDeadband = new NumericUpDown
             {
@@ -374,85 +443,53 @@ namespace MassaKWin
                 Maximum = 100000,
                 DecimalPlaces = 1,
                 Increment = 0.5M,
-                Dock = DockStyle.Top
+                Anchor = AnchorStyles.Left | AnchorStyles.Right
             };
-            var lblDeadband = new Label
-            {
-                Text = "Deadband (|Δweight| ≤ ... г игнорируется)",
-                Dock = DockStyle.Top,
-                AutoSize = true
-            };
+            AddRow(layout, CreateLabel("Deadband (|Δweight| ≤ ... г игнорируется)"), _numDeadband);
 
-            _cbWeightUnit = new ComboBox
+            _cbWeightUnit = new KryptonComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Dock = DockStyle.Top
+                Anchor = AnchorStyles.Left,
+                Width = 120
             };
             _cbWeightUnit.Items.AddRange(new object[] { "kg", "g" });
-
-            var lblUnit = new Label
-            {
-                Text = "Единицы веса по умолчанию",
-                Dock = DockStyle.Top,
-                AutoSize = true
-            };
+            AddRow(layout, CreateLabel("Единицы веса по умолчанию"), _cbWeightUnit);
 
             _numWeightDecimals = new NumericUpDown
             {
                 Minimum = 0,
                 Maximum = 6,
-                Dock = DockStyle.Top
+                Anchor = AnchorStyles.Left | AnchorStyles.Right
             };
-            var lblDecimals = new Label
-            {
-                Text = "Цифр после запятой",
-                Dock = DockStyle.Top,
-                AutoSize = true
-            };
+            AddRow(layout, CreateLabel("Цифр после запятой"), _numWeightDecimals);
 
-            _chkAutoZeroOnConnect = new CheckBox
+            _chkAutoZeroOnConnect = new KryptonCheckBox
             {
                 Text = "Авто-ноль/тара при подключении",
                 AutoSize = true,
-                Dock = DockStyle.Top
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0, 0, 0, 8)
             };
+            AddRow(layout, new Label(), _chkAutoZeroOnConnect);
 
-            _btnStartPolling = new Button
-            {
-                Text = "Запустить опрос",
-                AutoSize = true,
-                Dock = DockStyle.Left
-            };
-            _btnStartPolling.Click += async (_, _) => await StartPollingAsync();
-
-            _btnStopPolling = new Button
-            {
-                Text = "Остановить опрос",
-                AutoSize = true,
-                Dock = DockStyle.Left
-            };
-            _btnStopPolling.Click += async (_, _) => await StopPollingAsync();
-
+            _btnStartPolling = CreateActionButton("Запустить опрос", async (_, _) => await StartPollingAsync());
+            _btnStopPolling = CreateActionButton("Остановить опрос", async (_, _) => await StopPollingAsync());
             var buttonsPanel = new FlowLayoutPanel
             {
-                Dock = DockStyle.Top,
                 FlowDirection = FlowDirection.LeftToRight,
-                AutoSize = true
+                AutoSize = true,
+                Anchor = AnchorStyles.Right,
+                Margin = new Padding(0, 4, 0, 0)
             };
             buttonsPanel.Controls.Add(_btnStartPolling);
             buttonsPanel.Controls.Add(_btnStopPolling);
 
-            group.Controls.Add(buttonsPanel);
-            group.Controls.Add(_chkAutoZeroOnConnect);
-            group.Controls.Add(_numWeightDecimals);
-            group.Controls.Add(lblDecimals);
-            group.Controls.Add(_cbWeightUnit);
-            group.Controls.Add(lblUnit);
-            group.Controls.Add(_numDeadband);
-            group.Controls.Add(lblDeadband);
-            group.Controls.Add(_numScaleTimeout);
-            group.Controls.Add(lblTimeout);
-            group.Controls.Add(_chkStartPollingOnStartup);
+            var row = layout.RowCount++;
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.Controls.Add(buttonsPanel, 1, row);
+
+            group.Controls.Add(layout);
 
             return group;
         }
@@ -463,67 +500,37 @@ namespace MassaKWin
             {
                 Text = "Автопоиск",
                 Dock = DockStyle.Top,
-                Padding = new Padding(10)
+                Padding = new Padding(16),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = new Padding(0, 0, 0, 16)
             };
 
-            var lblRange = new Label
-            {
-                Text = "Диапазон IP: от ... до ...",
-                Dock = DockStyle.Top,
-                AutoSize = true
-            };
+            var layout = CreateTwoColumnLayout();
 
-            var ipPanel = new FlowLayoutPanel
+            _txtDiscoveryFrom = new KryptonTextBox { Width = 140 };
+            _txtDiscoveryTo = new KryptonTextBox { Width = 140 };
+            var ipRangePanel = new FlowLayoutPanel
             {
-                Dock = DockStyle.Top,
+                AutoSize = true,
                 FlowDirection = FlowDirection.LeftToRight,
-                AutoSize = true
+                Margin = new Padding(0, 0, 0, 8)
             };
+            ipRangePanel.Controls.Add(_txtDiscoveryFrom);
+            ipRangePanel.Controls.Add(new Label { Text = "до", AutoSize = true, Padding = new Padding(6, 6, 6, 0) });
+            ipRangePanel.Controls.Add(_txtDiscoveryTo);
+            AddRow(layout, CreateLabel("Диапазон IP: от ... до ..."), ipRangePanel);
 
-            _txtDiscoveryFrom = new TextBox { Width = 120 };
-            _txtDiscoveryTo = new TextBox { Width = 120 };
-            ipPanel.Controls.Add(_txtDiscoveryFrom);
-            ipPanel.Controls.Add(new Label { Text = "до", AutoSize = true, Padding = new Padding(5, 6, 5, 0) });
-            ipPanel.Controls.Add(_txtDiscoveryTo);
-
-            var portPanel = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                FlowDirection = FlowDirection.LeftToRight,
-                AutoSize = true
-            };
-            var lblPort = new Label { Text = "Порт по умолчанию", AutoSize = true, Padding = new Padding(0, 6, 5, 0) };
             _numDefaultPort = new NumericUpDown { Minimum = 1, Maximum = 65535, Width = 100 };
-            portPanel.Controls.Add(lblPort);
-            portPanel.Controls.Add(_numDefaultPort);
+            AddRow(layout, CreateLabel("Порт по умолчанию"), _numDefaultPort);
 
-            var parallelPanel = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                FlowDirection = FlowDirection.LeftToRight,
-                AutoSize = true
-            };
-            var lblParallel = new Label { Text = "Параллельных подключений", AutoSize = true, Padding = new Padding(0, 6, 5, 0) };
             _numParallelScan = new NumericUpDown { Minimum = 1, Maximum = 64, Width = 100 };
-            parallelPanel.Controls.Add(lblParallel);
-            parallelPanel.Controls.Add(_numParallelScan);
+            AddRow(layout, CreateLabel("Параллельных подключений"), _numParallelScan);
 
-            var timeoutPanel = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                FlowDirection = FlowDirection.LeftToRight,
-                AutoSize = true
-            };
-            var lblTimeout = new Label { Text = "Таймаут на IP, мс", AutoSize = true, Padding = new Padding(0, 6, 5, 0) };
             _numScanTimeout = new NumericUpDown { Minimum = 100, Maximum = 60000, Increment = 100, Width = 100 };
-            timeoutPanel.Controls.Add(lblTimeout);
-            timeoutPanel.Controls.Add(_numScanTimeout);
+            AddRow(layout, CreateLabel("Таймаут на IP, мс"), _numScanTimeout);
 
-            group.Controls.Add(timeoutPanel);
-            group.Controls.Add(parallelPanel);
-            group.Controls.Add(portPanel);
-            group.Controls.Add(ipPanel);
-            group.Controls.Add(lblRange);
+            group.Controls.Add(layout);
 
             return group;
         }
@@ -534,20 +541,24 @@ namespace MassaKWin
             {
                 Text = "Overlay",
                 Dock = DockStyle.Top,
-                Padding = new Padding(10)
+                Padding = new Padding(16),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = new Padding(0, 0, 0, 16)
             };
 
-            var lblTemplate = new Label { Text = "Шаблон текста (используйте {net}, {tare}, {status}, {unit})", AutoSize = true, Dock = DockStyle.Top };
-            _txtOverlayTemplate = new TextBox { Dock = DockStyle.Top, Width = 400 };
+            var layout = CreateTwoColumnLayout();
 
-            var lblNoConnection = new Label { Text = "Текст при отсутствии подключения", AutoSize = true, Dock = DockStyle.Top };
-            _txtOverlayNoConnection = new TextBox { Dock = DockStyle.Top, Width = 400 };
+            _txtOverlayTemplate = new KryptonTextBox { Width = 420 };
+            AddRow(layout, CreateLabel("Шаблон текста (используйте {net}, {tare}, {status}, {unit})"), _txtOverlayTemplate);
 
-            var lblUnstable = new Label { Text = "Статус при нестабильном весе", AutoSize = true, Dock = DockStyle.Top };
-            _txtOverlayUnstable = new TextBox { Dock = DockStyle.Top, Width = 400 };
+            _txtOverlayNoConnection = new KryptonTextBox { Width = 420 };
+            AddRow(layout, CreateLabel("Текст при отсутствии подключения"), _txtOverlayNoConnection);
 
-            var lblPosition = new Label { Text = "Положение по умолчанию", AutoSize = true, Dock = DockStyle.Top };
-            _cbOverlayPosition = new ComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList };
+            _txtOverlayUnstable = new KryptonTextBox { Width = 420 };
+            AddRow(layout, CreateLabel("Статус при нестабильном весе"), _txtOverlayUnstable);
+
+            _cbOverlayPosition = new KryptonComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
             _cbOverlayPosition.Items.AddRange(new object[]
             {
                 "Слева сверху",
@@ -555,15 +566,9 @@ namespace MassaKWin
                 "Слева снизу",
                 "Справа снизу"
             });
+            AddRow(layout, CreateLabel("Положение по умолчанию"), _cbOverlayPosition);
 
-            group.Controls.Add(_cbOverlayPosition);
-            group.Controls.Add(lblPosition);
-            group.Controls.Add(_txtOverlayUnstable);
-            group.Controls.Add(lblUnstable);
-            group.Controls.Add(_txtOverlayNoConnection);
-            group.Controls.Add(lblNoConnection);
-            group.Controls.Add(_txtOverlayTemplate);
-            group.Controls.Add(lblTemplate);
+            group.Controls.Add(layout);
 
             return group;
         }
@@ -574,17 +579,30 @@ namespace MassaKWin
             {
                 Text = "Логи",
                 Dock = DockStyle.Top,
-                Padding = new Padding(10)
+                Padding = new Padding(16),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = new Padding(0, 0, 0, 16)
             };
 
-            var lblFolder = new Label { Text = "Папка для логов", AutoSize = true, Dock = DockStyle.Top };
-            _txtLogDirectory = new TextBox { Dock = DockStyle.Top, Width = 400 };
-            _btnBrowseLogDirectory = new Button { Text = "Обзор...", AutoSize = true, Dock = DockStyle.Top };
+            var layout = CreateTwoColumnLayout();
+
+            _txtLogDirectory = new KryptonTextBox { Width = 420 };
+            _btnBrowseLogDirectory = new KryptonButton { Text = "Обзор...", AutoSize = true, MinimumSize = new Size(90, 32), Margin = new Padding(8, 0, 0, 8) };
             _btnBrowseLogDirectory.Click += (_, _) => BrowseLogFolder();
 
-            group.Controls.Add(_btnBrowseLogDirectory);
-            group.Controls.Add(_txtLogDirectory);
-            group.Controls.Add(lblFolder);
+            var directoryPanel = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                FlowDirection = FlowDirection.LeftToRight,
+                Margin = new Padding(0, 0, 0, 8)
+            };
+            directoryPanel.Controls.Add(_txtLogDirectory);
+            directoryPanel.Controls.Add(_btnBrowseLogDirectory);
+
+            AddRow(layout, CreateLabel("Папка для логов"), directoryPanel);
+
+            group.Controls.Add(layout);
 
             return group;
         }
@@ -595,17 +613,24 @@ namespace MassaKWin
             {
                 Text = "Уведомления",
                 Dock = DockStyle.Top,
-                Padding = new Padding(10)
+                Padding = new Padding(16),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = new Padding(0, 0, 0, 16)
             };
 
-            _chkEnableSounds = new CheckBox
+            var layout = CreateTwoColumnLayout();
+
+            _chkEnableSounds = new KryptonCheckBox
             {
                 Text = "Включить звуковые уведомления",
                 AutoSize = true,
-                Dock = DockStyle.Top
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0, 0, 0, 8)
             };
+            AddRow(layout, new Label(), _chkEnableSounds);
 
-            group.Controls.Add(_chkEnableSounds);
+            group.Controls.Add(layout);
             return group;
         }
 
@@ -748,7 +773,9 @@ namespace MassaKWin
                     );
 
                     // сохраняем ссылку на объект веса в Tag
-                    dgvScales.Rows[rowIndex].Tag = scale;
+                    var row = dgvScales.Rows[rowIndex];
+                    row.Tag = scale;
+                    ApplyScaleRowStyle(row, online, state.Stable);
                 }
             }
             finally
@@ -1201,10 +1228,29 @@ namespace MassaKWin
         {
             BeginInvoke(new Action(() =>
             {
+                var color = GetLogColor(message);
+                var isAtBottom = txtLog.SelectionStart >= txtLog.TextLength - 2;
+                txtLog.SelectionStart = txtLog.TextLength;
+                txtLog.SelectionLength = 0;
+                txtLog.SelectionColor = color;
                 txtLog.AppendText(message + Environment.NewLine);
+                txtLog.SelectionColor = txtLog.StateCommon.Content.Color1;
+                if (isAtBottom)
+                {
+                    txtLog.ScrollToCaret();
+                }
             }));
 
             TryWriteLogToFile(message);
+        }
+
+        private Color GetLogColor(string message)
+        {
+            if (message.Contains("ERROR"))
+                return Color.FromArgb(204, 52, 44);
+            if (message.Contains("WARN"))
+                return Color.FromArgb(205, 128, 40);
+            return Color.FromArgb(52, 91, 170);
         }
 
         private async Task RecreateScaleClientAsync(bool startImmediately)

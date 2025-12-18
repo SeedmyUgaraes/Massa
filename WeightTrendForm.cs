@@ -1,19 +1,22 @@
 using System;
+using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 using System.Windows.Forms.DataVisualization.Charting;
+using Krypton.Toolkit;
 using MassaKWin.Core;
+using MassaKWin.Ui;
 using Timer = System.Windows.Forms.Timer;
 
 namespace MassaKWin
 {
-    public partial class WeightTrendForm : Form
+    public partial class WeightTrendForm : KryptonForm
     {
         private readonly Scale _scale;
         private readonly WeightHistoryManager _historyManager;
         private Chart _chart = null!;
-        private ComboBox _intervalComboBox = null!;
-        private CheckBox _autoUpdateCheckBox = null!;
+        private KryptonComboBox _intervalComboBox = null!;
+        private KryptonCheckBox _autoUpdateCheckBox = null!;
         private Timer _timer = null!;
 
         public WeightTrendForm(Scale scale, WeightHistoryManager historyManager)
@@ -22,28 +25,30 @@ namespace MassaKWin
             _historyManager = historyManager ?? throw new ArgumentNullException(nameof(historyManager));
 
             InitializeComponent();
+            ThemeManager.Apply(this);
             Text = $"Тренд: {_scale.Name}";
         }
 
         private void InitializeComponent()
         {
             _chart = new Chart();
-            _intervalComboBox = new ComboBox();
-            _autoUpdateCheckBox = new CheckBox();
+            _intervalComboBox = new KryptonComboBox();
+            _autoUpdateCheckBox = new KryptonCheckBox();
             _timer = new Timer();
 
             SuspendLayout();
 
             Width = 900;
             Height = 600;
+            Padding = new Padding(8);
 
             var controlsPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 40,
+                Height = 50,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
-                Padding = new Padding(10, 8, 10, 8)
+                Padding = new Padding(10, 10, 10, 10)
             };
 
             _intervalComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -55,6 +60,7 @@ namespace MassaKWin
             _autoUpdateCheckBox.Text = "Автообновление";
             _autoUpdateCheckBox.AutoSize = true;
             _autoUpdateCheckBox.CheckedChanged += AutoUpdateCheckBox_CheckedChanged;
+            _autoUpdateCheckBox.Margin = new Padding(12, 12, 0, 0);
             controlsPanel.Controls.Add(_autoUpdateCheckBox);
 
             var chartArea = new ChartArea("Default");

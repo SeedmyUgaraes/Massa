@@ -730,9 +730,10 @@ namespace MassaKWin
                     if (statusAge < TimeSpan.Zero)
                         statusAge = TimeSpan.Zero;
 
+                    var durationText = FormatStatusDuration(statusAge);
                     string statusText = online
-                        ? $"Online {statusAge:hh\\:mm\\:ss}"
-                        : $"Offline {statusAge:hh\\:mm\\:ss}";
+                        ? $"Online {durationText}"
+                        : $"Offline {durationText}";
 
                     // добавляем строку
                     int rowIndex = dgvScales.Rows.Add(
@@ -780,6 +781,17 @@ namespace MassaKWin
                 dgvScales.CurrentCell = row.Cells[0];
                 dgvScales.FirstDisplayedScrollingRowIndex = 0;
             }
+        }
+
+        private string FormatStatusDuration(TimeSpan statusAge)
+        {
+            if (statusAge.TotalDays >= 1)
+            {
+                var days = (int)statusAge.TotalDays;
+                return $"{days}d {statusAge:hh\\:mm\\:ss}";
+            }
+
+            return statusAge.ToString(@"hh\:mm\:ss");
         }
 
         private void DgvScales_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)

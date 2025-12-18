@@ -50,8 +50,23 @@ namespace MassaKWin.Core
         {
             foreach (var scale in _scales)
             {
-                if (_tasks.ContainsKey(scale.Id))
-                    continue;
+                if (_tasks.TryGetValue(scale.Id, out var existingTask))
+                {
+                    if (existingTask.IsCompleted || existingTask.IsCanceled || existingTask.IsFaulted)
+                    {
+                        _tasks.Remove(scale.Id);
+                        if (_tokens.TryGetValue(scale.Id, out var existingCts))
+                        {
+                            existingCts.Cancel();
+                            existingCts.Dispose();
+                            _tokens.Remove(scale.Id);
+                        }
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
 
                 var cts = new CancellationTokenSource();
                 var task = Task.Run(() => PollLoopAsync(scale, cts.Token), cts.Token);
@@ -142,10 +157,17 @@ namespace MassaKWin.Core
                         await Task.Delay(_pollInterval, token);
                     }
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
                     // нормальное завершение
                     break;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    // This is an I/O timeout from responseCts, not app shutdown.
+                    _ = ex;
+                    LogMessage?.Invoke(
+                        $"[{DateTime.Now:HH:mm:ss}] Timeout from scale \"{scale.Name}\" ({scale.Ip}:{scale.Port}). Reconnecting...");
                 }
                 catch (Exception ex)
                 {

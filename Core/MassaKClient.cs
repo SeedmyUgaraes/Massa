@@ -20,6 +20,8 @@ namespace MassaKWin.Core
         private readonly TimeSpan _responseTimeout;
         private readonly double _deadbandGrams;
         private readonly bool _autoZeroOnConnect;
+        private readonly HashSet<Guid> _offlineLogged = new();
+        private readonly object _offlineLock = new object();
 
         private readonly Dictionary<Guid, Task> _tasks = new();
         private readonly Dictionary<Guid, CancellationTokenSource> _tokens = new();
@@ -109,6 +111,7 @@ namespace MassaKWin.Core
                     client = new TcpClient();
                     await ConnectWithTimeoutAsync(client, scale.Ip, scale.Port, _connectTimeout, token);
                     stream = client.GetStream();
+                    MarkScaleOnline(scale.Id);
 
                     LogMessage?.Invoke(
                         $"[{DateTime.Now:HH:mm:ss}] Подключение к весам \"{scale.Name}\" ({scale.Ip}:{scale.Port}) успешно.");
@@ -166,12 +169,12 @@ namespace MassaKWin.Core
                 {
                     // This is an I/O timeout from responseCts, not app shutdown.
                     _ = ex;
-                    LogMessage?.Invoke(
+                    LogOfflineOnce(scale,
                         $"[{DateTime.Now:HH:mm:ss}] Timeout from scale \"{scale.Name}\" ({scale.Ip}:{scale.Port}). Reconnecting...");
                 }
                 catch (Exception ex)
                 {
-                    LogMessage?.Invoke(
+                    LogOfflineOnce(scale,
                         $"[{DateTime.Now:HH:mm:ss}] Ошибка опроса весов \"{scale.Name}\" ({scale.Ip}:{scale.Port}): {ex.GetType().Name}: {ex.Message}");
                 }
                 finally
@@ -368,6 +371,28 @@ namespace MassaKWin.Core
             }
 
             return crc;
+        }
+
+        private void MarkScaleOnline(Guid scaleId)
+        {
+            lock (_offlineLock)
+            {
+                _offlineLogged.Remove(scaleId);
+            }
+        }
+
+        private void LogOfflineOnce(Scale scale, string message)
+        {
+            bool shouldLog;
+            lock (_offlineLock)
+            {
+                shouldLog = _offlineLogged.Add(scale.Id);
+            }
+
+            if (shouldLog)
+            {
+                LogMessage?.Invoke(message);
+            }
         }
     }
 }

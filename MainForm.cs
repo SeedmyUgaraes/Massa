@@ -11,6 +11,7 @@ using System.Windows.Forms;
 using Krypton.Toolkit;
 using MassaKWin.Core;
 using Timer = System.Windows.Forms.Timer;
+using MassaKWin.Ui;
 using ThemeManager = MassaKWin.Ui.ThemeManager;
 
 namespace MassaKWin
@@ -104,6 +105,8 @@ namespace MassaKWin
         private KryptonButton _btnBrowseLogDirectory = null!;
         private KryptonCheckBox _chkEnableSounds = null!;
         private KryptonButton _btnSaveSettings = null!;
+        private ContextMenuStrip _scalesMenu = null!;
+        private ContextMenuStrip _camerasMenu = null!;
         private async void OnAddScaleClicked(object? sender, EventArgs e)
         {
             // Окно добавления/редактирования весов
@@ -346,6 +349,8 @@ namespace MassaKWin
 
             dgvScales = CreateStyledGrid();
             dgvScales.CellDoubleClick += DgvScales_CellDoubleClick;
+            dgvScales.CellMouseDown += DgvScales_CellMouseDown;
+            dgvScales.KeyDown += DgvScales_KeyDown;
 
             dgvScales.Columns.Add("Name", "Имя");
             dgvScales.Columns.Add("IpPort", "IP:Port");
@@ -355,6 +360,12 @@ namespace MassaKWin
             dgvScales.Columns.Add("Stable", "Stable");
             dgvScales.Columns.Add("Online", "Online");
             dgvScales.Columns.Add("Status", "Статус");
+
+            _scalesMenu = new ContextMenuStrip();
+            var renameScaleItem = new ToolStripMenuItem("Переименовать");
+            renameScaleItem.Click += (_, _) => RenameSelectedScale();
+            _scalesMenu.Items.Add(renameScaleItem);
+            dgvScales.ContextMenuStrip = _scalesMenu;
 
             _btnAddScale = CreateActionButton("Добавить весы", OnAddScaleClicked);
             _btnDeleteScale = CreateActionButton("Удалить весы", OnDeleteScaleClicked);
@@ -388,11 +399,19 @@ namespace MassaKWin
             };
 
             dgvCameras = CreateStyledGrid();
+            dgvCameras.CellMouseDown += DgvCameras_CellMouseDown;
+            dgvCameras.KeyDown += DgvCameras_KeyDown;
 
             dgvCameras.Columns.Add("Name", "Имя камеры");
             dgvCameras.Columns.Add("IpPort", "IP:Port");
             dgvCameras.Columns.Add("Bindings", "Привязок весов");
             dgvCameras.Columns.Add("OsdStatus", "Статус OSD");
+
+            _camerasMenu = new ContextMenuStrip();
+            var renameCameraItem = new ToolStripMenuItem("Переименовать");
+            renameCameraItem.Click += (_, _) => RenameSelectedCamera();
+            _camerasMenu.Items.Add(renameCameraItem);
+            dgvCameras.ContextMenuStrip = _camerasMenu;
 
             _btnAddCamera = CreateActionButton("Добавить камеру", OnAddCameraClicked);
             _btnDeleteCamera = CreateActionButton("Удалить камеру", OnDeleteCameraClicked);
@@ -1181,6 +1200,51 @@ namespace MassaKWin
             trend.Show(this);
         }
 
+        private void DgvScales_CellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
+            {
+                dgvScales.ClearSelection();
+                dgvScales.Rows[e.RowIndex].Selected = true;
+                dgvScales.CurrentCell = dgvScales.Rows[e.RowIndex].Cells[0];
+            }
+        }
+
+        private void DgvScales_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.F2)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                RenameSelectedScale();
+            }
+        }
+
+        private void RenameSelectedScale()
+        {
+            var scale = dgvScales.CurrentRow?.Tag as Scale;
+            if (scale == null && dgvScales.CurrentRow != null)
+            {
+                var rowIndex = dgvScales.CurrentRow.Index;
+                if (rowIndex >= 0 && rowIndex < _scaleManager.Scales.Count)
+                    scale = _scaleManager.Scales[rowIndex];
+            }
+
+            if (scale == null)
+                return;
+
+            if (!RenameDialog.TryGetName(this, "Переименование весов", scale.Name, out var newName))
+                return;
+
+            if (string.Equals(scale.Name, newName, StringComparison.Ordinal))
+                return;
+
+            scale.Name = newName;
+            SaveConfig();
+            RefreshScalesGrid();
+            RefreshCamerasGrid();
+        }
+
         private void OnScaleUpdated(Scale scale)
         {
             _historyManager.AddSample(scale);
@@ -1314,6 +1378,51 @@ namespace MassaKWin
                 dgvCameras.CurrentCell = row.Cells[0];
                 dgvCameras.FirstDisplayedScrollingRowIndex = 0;
             }
+        }
+
+        private void DgvCameras_CellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
+            {
+                dgvCameras.ClearSelection();
+                dgvCameras.Rows[e.RowIndex].Selected = true;
+                dgvCameras.CurrentCell = dgvCameras.Rows[e.RowIndex].Cells[0];
+            }
+        }
+
+        private void DgvCameras_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.F2)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                RenameSelectedCamera();
+            }
+        }
+
+        private void RenameSelectedCamera()
+        {
+            var cam = dgvCameras.CurrentRow?.Tag as Camera;
+            if (cam == null && dgvCameras.CurrentRow != null)
+            {
+                var rowIndex = dgvCameras.CurrentRow.Index;
+                if (rowIndex >= 0 && rowIndex < _cameraManager.Cameras.Count)
+                    cam = _cameraManager.Cameras[rowIndex];
+            }
+
+            if (cam == null)
+                return;
+
+            if (!RenameDialog.TryGetName(this, "Переименование камеры", cam.Name, out var newName))
+                return;
+
+            if (string.Equals(cam.Name, newName, StringComparison.Ordinal))
+                return;
+
+            cam.Name = newName;
+            SaveConfig();
+            RefreshCamerasGrid();
+            _cameraOsdService?.MarkCameraDirty(cam.Id);
         }
 
 

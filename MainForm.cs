@@ -341,7 +341,10 @@ namespace MassaKWin
             {
                 Text = "Опрос весов",
                 Dock = DockStyle.Top,
-                Padding = new Padding(10)
+                Padding = new Padding(10),
+
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink
             };
 
             _chkStartPollingOnStartup = new CheckBox

@@ -34,11 +34,45 @@ namespace MassaKWin
         private bool? _lastInternetOk;
         private bool _checkingInternet;
 
-        private TabControl tabControl;
-        private TabPage tabScales;
-        private TabPage tabCameras;
-        private TabPage tabSettings;
-        private TabPage tabLog;
+        private KryptonSplitContainer _shellSplitContainer = null!;
+        private KryptonPanel _sidebarPanel = null!;
+        private KryptonPanel _contentHost = null!;
+        private FlowLayoutPanel _navButtonsPanel = null!;
+        private KryptonLabel _pageTitleLabel = null!;
+        private KryptonButton _btnNavScales = null!;
+        private KryptonButton _btnNavCameras = null!;
+        private KryptonButton _btnNavSettings = null!;
+        private KryptonButton _btnNavLog = null!;
+        private KryptonButton _btnToggleSidebar = null!;
+        private ToolTip _sidebarToolTip = null!;
+        private bool _sidebarCollapsed;
+        private bool _loadingConfig;
+
+        private Control _pageScales = null!;
+        private Control _pageCameras = null!;
+        private Control _pageSettings = null!;
+        private Control _pageLog = null!;
+        private readonly List<NavigationItem> _navItems = new();
+        private MainPage _currentPage = MainPage.Scales;
+
+        private const int SidebarExpandedWidth = 220;
+        private const int SidebarCollapsedWidth = 56;
+
+        private enum MainPage
+        {
+            Scales,
+            Cameras,
+            Settings,
+            Log
+        }
+
+        private class NavigationItem
+        {
+            public MainPage Page { get; init; }
+            public KryptonButton Button { get; init; } = null!;
+            public string Text { get; init; } = string.Empty;
+            public Image? Icon { get; init; }
+        }
 
         private DataGridView dgvScales;
         private DataGridView dgvCameras;
@@ -116,7 +150,7 @@ namespace MassaKWin
             Height = 700;
             StartPosition = FormStartPosition.CenterScreen;
 
-            InitializeComponents();
+            _loadingConfig = true;
 
             _scaleManager = new ScaleManager();
             _historyManager = new WeightHistoryManager();
@@ -125,6 +159,8 @@ namespace MassaKWin
             _cameraManager = new CameraManager();
 
             _configStorage = new ConfigStorage();
+
+            InitializeComponents();
 
             _ = LoadConfigAsync();
 
@@ -145,33 +181,169 @@ namespace MassaKWin
 
         private void InitializeComponents()
         {
-            tabControl = new TabControl
+            KeyPreview = true;
+            _sidebarToolTip = new ToolTip();
+
+            _shellSplitContainer = new KryptonSplitContainer
             {
                 Dock = DockStyle.Fill,
-                Padding = new Point(12, 4)
+                FixedPanel = FixedPanel.Panel1,
+                IsSplitterFixed = true,
+                Panel1MinSize = SidebarCollapsedWidth,
+                SplitterDistance = SidebarExpandedWidth,
+                SplitterWidth = 1
             };
 
-            tabScales = new TabPage("Весы") { Padding = new Padding(8) };
-            tabCameras = new TabPage("Камеры") { Padding = new Padding(8) };
-            tabSettings = new TabPage("Настройки") { Padding = new Padding(8), AutoScroll = true };
-            tabLog = new TabPage("Лог") { Padding = new Padding(8) };
+            BuildSidebar();
+            BuildContentHost();
 
-            tabControl.TabPages.Add(tabScales);
-            tabControl.TabPages.Add(tabCameras);
-            tabControl.TabPages.Add(tabSettings);
-            tabControl.TabPages.Add(tabLog);
+            Controls.Add(_shellSplitContainer);
 
-            InitializeScalesTab();
-            InitializeCamerasTab();
-            InitializeSettingsTab();
-            InitializeLogTab();
-
-            Controls.Add(tabControl);
             ThemeManager.Apply(this);
+            UpdateSidebarVisualState();
+            ShowPage(MainPage.Scales);
         }
 
-        private void InitializeScalesTab()
+        private void BuildSidebar()
         {
+            _sidebarPanel = new KryptonPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(8)
+            };
+
+            var sidebarLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                RowCount = 3,
+                ColumnCount = 1
+            };
+            sidebarLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            sidebarLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            sidebarLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            sidebarLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            var headerPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 48,
+                Padding = new Padding(4)
+            };
+            var headerLabel = new KryptonLabel
+            {
+                Dock = DockStyle.Fill,
+                Values = { Text = "MassaK" }
+            };
+            headerLabel.StateCommon.ShortText.Font = new Font(Font, FontStyle.Bold);
+            headerLabel.StateCommon.ShortText.Color1 = Color.FromArgb(52, 91, 170);
+            headerPanel.Controls.Add(headerLabel);
+
+            _navButtonsPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(0, 8, 0, 8)
+            };
+
+            _btnNavScales = CreateNavButton("Весы", MainPage.Scales, SystemIcons.Information.ToBitmap());
+            _btnNavCameras = CreateNavButton("Камеры", MainPage.Cameras, SystemIcons.Application.ToBitmap());
+            _btnNavSettings = CreateNavButton("Настройки", MainPage.Settings, SystemIcons.Shield.ToBitmap());
+            _btnNavLog = CreateNavButton("Лог", MainPage.Log, SystemIcons.Warning.ToBitmap());
+
+            _navButtonsPanel.Controls.AddRange(new Control[]
+            {
+                _btnNavScales,
+                _btnNavCameras,
+                _btnNavSettings,
+                _btnNavLog
+            });
+
+            _btnToggleSidebar = new KryptonButton
+            {
+                Dock = DockStyle.Fill,
+                Height = 40,
+                ButtonStyle = ButtonStyle.LowProfile,
+                Margin = new Padding(0, 8, 0, 0)
+            };
+            _btnToggleSidebar.Values.Text = "≡";
+            _btnToggleSidebar.Click += (_, _) => ToggleSidebar();
+
+            var togglePanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Height = 48,
+                Padding = new Padding(0, 8, 0, 0)
+            };
+            togglePanel.Controls.Add(_btnToggleSidebar);
+
+            sidebarLayout.Controls.Add(headerPanel, 0, 0);
+            sidebarLayout.Controls.Add(_navButtonsPanel, 0, 1);
+            sidebarLayout.Controls.Add(togglePanel, 0, 2);
+
+            _sidebarPanel.Controls.Add(sidebarLayout);
+            _shellSplitContainer.Panel1.Controls.Add(_sidebarPanel);
+        }
+
+        private void BuildContentHost()
+        {
+            _contentHost = new KryptonPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(8)
+            };
+
+            _pageScales = BuildScalesPage();
+            _pageCameras = BuildCamerasPage();
+            _pageSettings = BuildSettingsPage();
+            _pageLog = BuildLogPage();
+
+            _contentHost.Controls.Add(_pageScales);
+            _contentHost.Controls.Add(_pageCameras);
+            _contentHost.Controls.Add(_pageSettings);
+            _contentHost.Controls.Add(_pageLog);
+
+            _pageTitleLabel = new KryptonLabel
+            {
+                Dock = DockStyle.Fill,
+                Values = { Text = "MassaK" }
+            };
+            _pageTitleLabel.StateCommon.ShortText.Font = new Font(Font, FontStyle.Bold);
+            _pageTitleLabel.StateCommon.ShortText.Color1 = Color.FromArgb(40, 40, 40);
+
+            var titlePanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 38,
+                Padding = new Padding(8, 8, 8, 4)
+            };
+            titlePanel.Controls.Add(_pageTitleLabel);
+
+            var contentLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                RowCount = 2,
+                ColumnCount = 1
+            };
+            contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            contentLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
+            contentLayout.Controls.Add(titlePanel, 0, 0);
+            contentLayout.Controls.Add(_contentHost, 0, 1);
+
+            _shellSplitContainer.Panel2.Controls.Add(contentLayout);
+        }
+
+        private KryptonPanel BuildScalesPage()
+        {
+            var page = new KryptonPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(8)
+            };
+
             dgvScales = CreateStyledGrid();
             dgvScales.CellDoubleClick += DgvScales_CellDoubleClick;
 
@@ -182,7 +354,6 @@ namespace MassaKWin
             dgvScales.Columns.Add("Tare", "Tare, кг");
             dgvScales.Columns.Add("Stable", "Stable");
             dgvScales.Columns.Add("Online", "Online");
-            // Колонка с текстовым статусом и временем нахождения в состоянии
             dgvScales.Columns.Add("Status", "Статус");
 
             _btnAddScale = CreateActionButton("Добавить весы", OnAddScaleClicked);
@@ -203,12 +374,19 @@ namespace MassaKWin
                 _btnAddScale, _btnDeleteScale, _btnAutoDiscoverScales
             });
 
-            tabScales.Controls.Add(dgvScales);
-            tabScales.Controls.Add(scalesPanel);
+            page.Controls.Add(dgvScales);
+            page.Controls.Add(scalesPanel);
+            return page;
         }
 
-        private void InitializeCamerasTab()
+        private KryptonPanel BuildCamerasPage()
         {
+            var page = new KryptonPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(8)
+            };
+
             dgvCameras = CreateStyledGrid();
 
             dgvCameras.Columns.Add("Name", "Имя камеры");
@@ -234,12 +412,19 @@ namespace MassaKWin
                 _btnAddCamera, _btnDeleteCamera, _btnEditBindings
             });
 
-            tabCameras.Controls.Add(dgvCameras);
-            tabCameras.Controls.Add(camerasPanel);
+            page.Controls.Add(dgvCameras);
+            page.Controls.Add(camerasPanel);
+            return page;
         }
 
-        private void InitializeSettingsTab()
+        private KryptonPanel BuildSettingsPage()
         {
+            var page = new KryptonPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(8)
+            };
+
             var scrollPanel = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -283,11 +468,18 @@ namespace MassaKWin
             layout.Controls.Add(bottomPanel, 0, 5);
 
             scrollPanel.Controls.Add(layout);
-            tabSettings.Controls.Add(scrollPanel);
+            page.Controls.Add(scrollPanel);
+            return page;
         }
 
-        private void InitializeLogTab()
+        private KryptonPanel BuildLogPage()
         {
+            var page = new KryptonPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(8)
+            };
+
             txtLog = new KryptonRichTextBox
             {
                 Dock = DockStyle.Fill,
@@ -299,7 +491,164 @@ namespace MassaKWin
                     Border = { DrawBorders = PaletteDrawBorders.All, Rounding = 6 }
                 }
             };
-            tabLog.Controls.Add(txtLog);
+            page.Controls.Add(txtLog);
+            return page;
+        }
+
+        private KryptonButton CreateNavButton(string text, MainPage page, Image? icon)
+        {
+            var button = new KryptonButton
+            {
+                Width = SidebarExpandedWidth - 16,
+                Height = 44,
+                ButtonStyle = ButtonStyle.LowProfile,
+                Margin = new Padding(0, 0, 0, 8),
+                Tag = page
+            };
+
+            button.Values.Text = text;
+            button.Values.Image = icon;
+            button.StateCommon.Content.ImageH = PaletteRelativeAlign.Near;
+            button.StateCommon.Content.ShortText.TextH = PaletteRelativeAlign.Near;
+            button.StateCommon.Content.Padding = new Padding(12, 8, 12, 8);
+            button.Click += (_, _) => ShowPage(page);
+
+            _navItems.Add(new NavigationItem
+            {
+                Page = page,
+                Button = button,
+                Text = text,
+                Icon = icon
+            });
+
+            ApplyNavButtonState(button, false);
+            return button;
+        }
+
+        private void ApplyNavButtonState(KryptonButton button, bool selected)
+        {
+            var background = selected ? Color.FromArgb(227, 235, 250) : Color.Transparent;
+            var border = selected ? Color.FromArgb(95, 134, 238) : Color.Transparent;
+
+            button.StateCommon.Back.Color1 = background;
+            button.StateCommon.Back.Color2 = background;
+            button.StateCommon.Border.DrawBorders = PaletteDrawBorders.All;
+            button.StateCommon.Border.Rounding = 8;
+            button.StateCommon.Border.Width = selected ? 1 : 0;
+            button.StateCommon.Border.Color1 = border;
+            button.StateCommon.Border.Color2 = border;
+            button.StateCommon.Content.ShortText.Font = selected ? new Font(Font, FontStyle.Bold) : Font;
+            button.StateTracking.Back.Color1 = Color.FromArgb(235, 240, 248);
+            button.StateTracking.Back.Color2 = button.StateTracking.Back.Color1;
+            button.StateTracking.Border.DrawBorders = PaletteDrawBorders.All;
+            button.StateTracking.Border.Rounding = 8;
+        }
+
+        private void UpdateSidebarVisualState()
+        {
+            if (_shellSplitContainer != null)
+                _shellSplitContainer.SplitterDistance = _sidebarCollapsed ? SidebarCollapsedWidth : SidebarExpandedWidth;
+
+            foreach (var item in _navItems)
+            {
+                item.Button.Values.Text = _sidebarCollapsed ? string.Empty : item.Text;
+                item.Button.Width = (_sidebarCollapsed ? SidebarCollapsedWidth : SidebarExpandedWidth) - 16;
+                item.Button.StateCommon.Content.Padding = _sidebarCollapsed ? new Padding(8) : new Padding(12, 8, 12, 8);
+                _sidebarToolTip.SetToolTip(item.Button, _sidebarCollapsed ? item.Text : string.Empty);
+                ApplyNavButtonState(item.Button, item.Page == _currentPage);
+            }
+
+            _btnToggleSidebar.Values.Text = _sidebarCollapsed ? "≡" : "≡ Свернуть меню";
+            _sidebarToolTip.SetToolTip(_btnToggleSidebar, _sidebarCollapsed ? "Развернуть меню" : "Свернуть меню");
+        }
+
+        private void ToggleSidebar()
+        {
+            _sidebarCollapsed = !_sidebarCollapsed;
+            _settings.SidebarCollapsed = _sidebarCollapsed;
+            UpdateSidebarVisualState();
+            if (!_loadingConfig)
+                SaveConfig();
+        }
+
+        private MainPage ParsePageFromSettings(string? pageName)
+        {
+            if (Enum.TryParse(pageName, out MainPage page))
+                return page;
+
+            return MainPage.Scales;
+        }
+
+        private void ShowPage(MainPage page)
+        {
+            _currentPage = page;
+
+            foreach (Control control in _contentHost.Controls)
+                control.Visible = false;
+
+            var target = page switch
+            {
+                MainPage.Scales => _pageScales,
+                MainPage.Cameras => _pageCameras,
+                MainPage.Settings => _pageSettings,
+                MainPage.Log => _pageLog,
+                _ => _pageScales
+            };
+
+            if (target != null)
+            {
+                target.Visible = true;
+                target.BringToFront();
+            }
+
+            foreach (var item in _navItems)
+            {
+                ApplyNavButtonState(item.Button, item.Page == page);
+            }
+
+            var pageTitle = page switch
+            {
+                MainPage.Scales => "Весы",
+                MainPage.Cameras => "Камеры",
+                MainPage.Settings => "Настройки",
+                MainPage.Log => "Лог",
+                _ => "MassaK"
+            };
+
+            _pageTitleLabel.Values.Text = pageTitle;
+            Text = $"MassaK — {pageTitle}";
+
+            _settings.LastPage = page.ToString();
+            if (!_loadingConfig)
+                SaveConfig();
+        }
+
+        private void ApplyNavigationPreferences()
+        {
+            _sidebarCollapsed = _settings.SidebarCollapsed;
+            UpdateSidebarVisualState();
+            ShowPage(ParsePageFromSettings(_settings.LastPage));
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            switch (keyData)
+            {
+                case Keys.Control | Keys.D1:
+                    ShowPage(MainPage.Scales);
+                    return true;
+                case Keys.Control | Keys.D2:
+                    ShowPage(MainPage.Cameras);
+                    return true;
+                case Keys.Control | Keys.D3:
+                    ShowPage(MainPage.Settings);
+                    return true;
+                case Keys.Control | Keys.D4:
+                    ShowPage(MainPage.Log);
+                    return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         private KryptonButton CreateActionButton(string text, EventHandler onClick)
@@ -1080,6 +1429,7 @@ namespace MassaKWin
 
         private async Task LoadConfigAsync()
         {
+            _loadingConfig = true;
             try
             {
                 var config = _configStorage.Load();
@@ -1093,10 +1443,15 @@ namespace MassaKWin
 
                 RefreshScalesGrid();
                 RefreshCamerasGrid();
+                ApplyNavigationPreferences();
             }
             catch (Exception ex)
             {
                 AppendLog($"[{DateTime.Now:HH:mm:ss}] Ошибка загрузки конфигурации: {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                _loadingConfig = false;
             }
         }
 

@@ -38,5 +38,7 @@ namespace MassaKWin.Core
         public OverlayPosition OverlayDefaultPosition { get; set; } = OverlayPosition.TopLeft;
         public string LogDirectory { get; set; } = "logs";
         public bool EnableSoundNotifications { get; set; } = false;
+        public bool SidebarCollapsed { get; set; } = false;
+        public string LastPage { get; set; } = "Scales";
     }
 }

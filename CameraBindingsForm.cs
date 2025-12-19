@@ -13,6 +13,7 @@ namespace MassaKWin
 {
     public partial class CameraBindingsForm : KryptonForm
     {
+        private const int MaxOverlayId = 4;
         private readonly Camera _camera;
         private readonly ScaleManager _scaleManager;
         private DataGridView _dgvBindings = null!;
@@ -74,7 +75,7 @@ namespace MassaKWin
                 .Where(r => r.Cells["Enabled"].Value is bool enabled && enabled)
                 .ToList();
 
-            if (enabledRows.Count > 4)
+            if (enabledRows.Count > MaxOverlayId)
             {
                 MessageBox.Show("Количество включенных привязок не может превышать 4.");
                 return null;
@@ -104,7 +105,7 @@ namespace MassaKWin
                         return null;
                     }
                 }
-                else if (overlayId < 1 || overlayId > 4)
+                else if (overlayId < 1 || overlayId > MaxOverlayId)
                 {
                     MessageBox.Show("OverlayId должен быть от 1 до 4");
                     return null;
@@ -117,7 +118,7 @@ namespace MassaKWin
                 }
 
                 usedOverlayIds.Add(overlayId);
-                while (overlayCounter <= 4 && usedOverlayIds.Contains(overlayCounter))
+                while (overlayCounter <= MaxOverlayId && usedOverlayIds.Contains(overlayCounter))
                 {
                     overlayCounter++;
                 }
@@ -140,13 +141,13 @@ namespace MassaKWin
         private static int GetNextFreeOverlayId(int startFrom, HashSet<int> usedOverlayIds)
         {
             var start = Math.Max(1, startFrom);
-            for (int id = start; id <= 4; id++)
+            for (int id = start; id <= MaxOverlayId; id++)
             {
                 if (!usedOverlayIds.Contains(id))
                     return id;
             }
 
-            for (int id = 1; id < start && id <= 4; id++)
+            for (int id = 1; id < start && id <= MaxOverlayId; id++)
             {
                 if (!usedOverlayIds.Contains(id))
                     return id;
@@ -159,7 +160,7 @@ namespace MassaKWin
         {
             using var client = new HikvisionOsdClient(_camera.Username, _camera.Password);
 
-            for (int overlayId = 1; overlayId <= 4; overlayId++)
+            for (int overlayId = 1; overlayId <= MaxOverlayId; overlayId++)
             {
                 try
                 {

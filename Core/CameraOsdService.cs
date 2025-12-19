@@ -10,6 +10,7 @@ namespace MassaKWin.Core
 {
     public class CameraOsdService
     {
+        private const int MaxOverlayId = 4;
         private readonly IList<Camera> _cameras;
         private readonly ScaleManager _scaleManager;
         private readonly TimeSpan _updateInterval;
@@ -29,6 +30,7 @@ namespace MassaKWin.Core
         private readonly ConcurrentDictionary<Guid, bool> _dirtyScales;
         private readonly ConcurrentDictionary<Guid, bool> _dirtyCameras;
         private readonly ConcurrentDictionary<Guid, DateTime> _lastStatusChecksUtc;
+        private readonly ConcurrentDictionary<(Guid CameraId, int OverlayId, string Axis), bool> _positionClampWarnings;
 
         private static readonly TimeSpan MinOverlayUpdateInterval = TimeSpan.FromMilliseconds(100);
         private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromMilliseconds(5000);
@@ -65,6 +67,7 @@ namespace MassaKWin.Core
             _dirtyScales = new ConcurrentDictionary<Guid, bool>();
             _dirtyCameras = new ConcurrentDictionary<Guid, bool>();
             _lastStatusChecksUtc = new ConcurrentDictionary<Guid, DateTime>();
+            _positionClampWarnings = new ConcurrentDictionary<(Guid, int, string), bool>();
         }
 
         public void MarkScaleDirty(Guid scaleId)
@@ -124,6 +127,7 @@ namespace MassaKWin.Core
             _dirtyScales.Clear();
             _dirtyCameras.Clear();
             _lastStatusChecksUtc.Clear();
+            _positionClampWarnings.Clear();
 
             lock (_statusLock)
             {
@@ -164,14 +168,23 @@ namespace MassaKWin.Core
                     var dirtyCamera = _dirtyCameras.ContainsKey(camera.Id);
                     var keepCameraDirty = false;
 
+                    var enabledLineIndex = 0;
                     for (int i = 0; i < camera.Bindings.Count; i++)
                     {
                         var binding = camera.Bindings[i];
                         if (!binding.Enabled)
                             continue;
 
+                        if (!IsOverlayIdValid(binding.OverlayId))
+                        {
+                            LogWarn($"OSD binding skipped: invalid OverlayId {binding.OverlayId} for camera \"{camera.Name}\" ({camera.Ip}). Binding scale: {binding.Scale?.Name ?? "unknown"}.");
+                            continue;
+                        }
+
                         var scale = binding.Scale ?? _scaleManager.Scales.FirstOrDefault(s => s.Id == binding.Id);
                         var cacheKey = (camera.Id, binding.OverlayId);
+                        var lineIndex = enabledLineIndex;
+                        enabledLineIndex++;
 
                         bool scaleDirty = scale != null && _dirtyScales.ContainsKey(scale.Id);
                         bool shouldProcess = dirtyCamera || scaleDirty;
@@ -203,16 +216,27 @@ namespace MassaKWin.Core
 
                         int positionX = binding.AutoPosition ? camera.BasePosX : binding.PositionX;
                         int positionY = binding.AutoPosition
-                            ? camera.BasePosY + i * camera.LineHeight
+                            ? camera.BasePosY + lineIndex * camera.LineHeight
                             : binding.PositionY;
 
-                        await client.SendOverlayTextAsync(
-                            camera.Ip,
-                            binding.OverlayId,
-                            positionX,
-                            positionY,
-                            newText,
-                            token);
+                        positionX = ClampPosition(camera, binding, positionX, "X");
+                        positionY = ClampPosition(camera, binding, positionY, "Y");
+
+                        try
+                        {
+                            await client.SendOverlayTextAsync(
+                                camera.Ip,
+                                binding.OverlayId,
+                                positionX,
+                                positionY,
+                                newText,
+                                token);
+                        }
+                        catch (InvalidOperationException ex) when (IsOsdBadRequest(ex))
+                        {
+                            LogOsdUpdateFailed(camera, binding, positionX, positionY, newText, ex);
+                            continue;
+                        }
 
                         _overlayCache[cacheKey] = new OverlayCacheEntry(newText, now);
                         if (scale != null)
@@ -229,14 +253,6 @@ namespace MassaKWin.Core
                 catch (OperationCanceledException)
                 {
                     break;
-                }
-                catch (HttpRequestException ex)
-                {
-                    HandleCameraError(camera, ex);
-                }
-                catch (InvalidOperationException ex)
-                {
-                    HandleCameraError(camera, ex);
                 }
                 catch (Exception ex)
                 {
@@ -306,6 +322,108 @@ namespace MassaKWin.Core
         {
             var reason = $"{ex.GetType().Name}: {ex.Message}";
             UpdateCameraStatus(camera, false, reason);
+        }
+
+        private int ClampPosition(Camera camera, CameraScaleBinding binding, int value, string axis)
+        {
+            if (value >= 0)
+                return value;
+
+            var key = (camera.Id, binding.OverlayId, axis);
+            if (_positionClampWarnings.TryAdd(key, true))
+            {
+                LogWarn($"OSD position clamped: camera \"{camera.Name}\" ({camera.Ip}), OverlayId {binding.OverlayId}, axis {axis}, value {value} -> 0.");
+            }
+
+            return 0;
+        }
+
+        private static bool IsOverlayIdValid(int overlayId)
+        {
+            return overlayId >= 1 && overlayId <= MaxOverlayId;
+        }
+
+        private static bool IsOsdBadRequest(InvalidOperationException ex)
+        {
+            if (TryParseOsdError(ex, out var statusCode, out var body))
+            {
+                if (statusCode == 400)
+                    return true;
+                if (!string.IsNullOrWhiteSpace(body) &&
+                    (body.Contains("badParameters", StringComparison.OrdinalIgnoreCase) ||
+                     body.Contains("Invalid XML Content", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+            }
+
+            return ex.Message.Contains("badParameters", StringComparison.OrdinalIgnoreCase) ||
+                   ex.Message.Contains("Invalid XML Content", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void LogOsdUpdateFailed(
+            Camera camera,
+            CameraScaleBinding binding,
+            int positionX,
+            int positionY,
+            string displayText,
+            InvalidOperationException ex)
+        {
+            TryParseOsdError(ex, out var statusCode, out var body);
+            var displayPreview = BuildDisplayPreview(displayText);
+            var length = displayText?.Length ?? 0;
+            var statusText = statusCode.HasValue ? statusCode.Value.ToString() : "unknown";
+            var bodyText = string.IsNullOrWhiteSpace(body) ? "empty" : body;
+
+            LogWarn(
+                $"OSD update failed for camera \"{camera.Name}\" ({camera.Ip}), OverlayId {binding.OverlayId}, " +
+                $"posX {positionX}, posY {positionY}, textLen {length}, textPreview \"{displayPreview}\", " +
+                $"status {statusText}, body \"{bodyText}\".");
+        }
+
+        private static string BuildDisplayPreview(string? displayText)
+        {
+            if (string.IsNullOrEmpty(displayText))
+                return string.Empty;
+
+            var compact = displayText.Replace("\r", " ").Replace("\n", " ");
+            return compact.Length <= 80 ? compact : compact.Substring(0, 80);
+        }
+
+        private static bool TryParseOsdError(InvalidOperationException ex, out int? statusCode, out string? body)
+        {
+            statusCode = null;
+            body = null;
+
+            var message = ex.Message ?? string.Empty;
+            var prefix = "Hikvision OSD error:";
+            var prefixIndex = message.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+            if (prefixIndex < 0)
+                return false;
+
+            var bodyIndex = message.IndexOf("Body:", StringComparison.OrdinalIgnoreCase);
+            var statusText = bodyIndex > -1
+                ? message.Substring(prefixIndex + prefix.Length, bodyIndex - (prefixIndex + prefix.Length))
+                : message.Substring(prefixIndex + prefix.Length);
+            statusText = statusText.Trim();
+            if (!string.IsNullOrWhiteSpace(statusText))
+            {
+                var parts = statusText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length > 0 && int.TryParse(parts[0], out var parsedCode))
+                    statusCode = parsedCode;
+            }
+
+            if (bodyIndex > -1)
+            {
+                body = message.Substring(bodyIndex + "Body:".Length).Trim();
+            }
+
+            return true;
+        }
+
+        private void LogWarn(string message)
+        {
+            LogMessage?.Invoke($"[{DateTime.Now:HH:mm:ss}] WARN {message}");
         }
 
         private void CheckCameraTimeout(Camera camera)

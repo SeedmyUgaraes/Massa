@@ -527,7 +527,6 @@ namespace MassaKWin
 
             button.Values.Text = text;
             button.Values.Image = icon;
-            button.StateCommon.Content.ImageH = PaletteRelativeAlign.Near;
             button.StateCommon.Content.ShortText.TextH = PaletteRelativeAlign.Near;
             button.StateCommon.Content.Padding = new Padding(12, 8, 12, 8);
             button.Click += (_, _) => ShowPage(page);
@@ -1436,19 +1435,6 @@ namespace MassaKWin
 
                     ApplyOverlayDefaults(cam);
 
-                    int overlayId = 1;
-                    foreach (var scale in _scaleManager.Scales)
-                    {
-                        cam.Bindings.Add(new CameraScaleBinding
-                        {
-                            Camera = cam,
-                            Scale = scale,
-                            OverlayId = overlayId++,
-                            AutoPosition = true,
-                            Enabled = true
-                        });
-                    }
-
                     _cameraManager.Cameras.Add(cam);
                     SaveConfig();
                     await RecreateCameraOsdServiceAsync();
@@ -1811,6 +1797,7 @@ namespace MassaKWin
                 _settings.WeightDecimalPlaces);
 
             _cameraOsdService.CameraStatusChanged += OnCameraStatusChanged;
+            _cameraOsdService.LogMessage += AppendLog;
 
             _cameraOsdService.Start();
         }

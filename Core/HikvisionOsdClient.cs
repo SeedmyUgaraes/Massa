@@ -18,9 +18,6 @@ namespace MassaKWin.Core
     public class HikvisionOsdClient : IDisposable
     {
         private readonly HttpClient _httpClient;
-        private readonly Action<string>? _logMessage;
-        private const int DefaultVideoWidth = 1920;
-        private const int DefaultVideoHeight = 1080;
         private const int DefaultChannelId = 1;
         private static readonly TimeSpan NormalizedCacheDuration = TimeSpan.FromMinutes(10);
         private static readonly (int Width, int Height) DefaultNormalizedSize = (704, 576);
@@ -93,75 +90,6 @@ namespace MassaKWin.Core
             {
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
                 throw new InvalidOperationException($"Hikvision OSD error: {(int)response.StatusCode} {response.ReasonPhrase}. Body: {body}");
-            }
-        }
-
-        public async Task<(int Width, int Height)> GetVideoResolutionAsync(
-            string cameraIp,
-            int port,
-            CancellationToken cancellationToken = default)
-        {
-            var endpoints = new[] { "/ISAPI/Streaming/channels/101", "/ISAPI/Streaming/channels/1" };
-
-            foreach (var endpoint in endpoints)
-            {
-                try
-                {
-                    var url = $"http://{cameraIp}:{port}{endpoint}";
-                    using var response = await _httpClient.GetAsync(url, cancellationToken);
-                    if (!response.IsSuccessStatusCode)
-                        continue;
-
-                    var xml = await response.Content.ReadAsStringAsync(cancellationToken);
-                    if (TryParseResolution(xml, out var width, out var height))
-                    {
-                        return (width, height);
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch
-                {
-                    // ignore and try next endpoint
-                }
-            }
-
-            return (DefaultVideoWidth, DefaultVideoHeight);
-        }
-
-        private static bool TryParseResolution(string xml, out int width, out int height)
-        {
-            width = 0;
-            height = 0;
-
-            if (string.IsNullOrWhiteSpace(xml))
-                return false;
-
-            try
-            {
-                var doc = XDocument.Parse(xml);
-                var widthElement = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "videoResolutionWidth");
-                var heightElement = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "videoResolutionHeight");
-
-                if (widthElement == null || heightElement == null)
-                    return false;
-
-                if (!int.TryParse(widthElement.Value, out width))
-                    return false;
-
-                if (!int.TryParse(heightElement.Value, out height))
-                    return false;
-
-                if (width <= 0 || height <= 0)
-                    return false;
-
-                return true;
-            }
-            catch
-            {
-                return false;
             }
         }
 

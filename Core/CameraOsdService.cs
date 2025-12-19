@@ -224,13 +224,31 @@ namespace MassaKWin.Core
                         }
 
                         var (normWidth, normHeight) = await client.GetNormalizedScreenSizeAsync(camera.Ip, camera.Port, token);
-                        var lineHeight = Math.Clamp(camera.LineHeight, 24, 40);
-                        int positionX = OverlayMarginLeft;
-                        int posYBottom = normHeight - OverlayMarginBottom;
-                        int positionY = posYBottom - (lineIndex * lineHeight);
+                        var lineHeight = Math.Clamp(camera.LineHeight, 18, 48);
+                        int baseX;
+                        int baseY;
 
-                        positionX = ClampPosition(camera, binding, positionX, "X", normWidth - 1);
-                        positionY = ClampPosition(camera, binding, positionY, "Y", normHeight - 1);
+                        if (camera.OsdBasePosX.HasValue && camera.OsdBasePosY.HasValue)
+                        {
+                            baseX = camera.OsdBasePosX.Value;
+                            baseY = camera.OsdBasePosY.Value;
+                            var minBaseY = (MaxOverlayId - 1) * lineHeight;
+                            if (baseY < minBaseY)
+                            {
+                                baseY = minBaseY;
+                            }
+                        }
+                        else
+                        {
+                            baseX = OverlayMarginLeft;
+                            baseY = normHeight - OverlayMarginBottom;
+                        }
+
+                        int positionX = baseX;
+                        int positionY = baseY - (lineIndex * lineHeight);
+
+                        positionX = ClampPosition(camera, binding, positionX, "X", normWidth);
+                        positionY = ClampPosition(camera, binding, positionY, "Y", normHeight);
 
                         try
                         {

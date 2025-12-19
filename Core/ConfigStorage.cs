@@ -32,6 +32,8 @@ namespace MassaKWin.Core
         public int BasePosX { get; set; }
         public int BasePosY { get; set; }
         public int LineHeight { get; set; }
+        public int? OsdBasePosX { get; set; }
+        public int? OsdBasePosY { get; set; }
     }
 
     public class CameraBindingConfigDto
@@ -116,7 +118,9 @@ namespace MassaKWin.Core
                     Password = camera.Password,
                     BasePosX = camera.BasePosX,
                     BasePosY = camera.BasePosY,
-                    LineHeight = camera.LineHeight
+                    LineHeight = camera.LineHeight,
+                    OsdBasePosX = camera.OsdBasePosX,
+                    OsdBasePosY = camera.OsdBasePosY
                 });
 
                 foreach (var binding in camera.Bindings)
@@ -167,7 +171,9 @@ namespace MassaKWin.Core
                     Password = cameraDto.Password,
                     BasePosX = cameraDto.BasePosX,
                     BasePosY = cameraDto.BasePosY,
-                    LineHeight = cameraDto.LineHeight
+                    LineHeight = cameraDto.LineHeight,
+                    OsdBasePosX = cameraDto.OsdBasePosX,
+                    OsdBasePosY = cameraDto.OsdBasePosY
                 };
 
                 cameraManager.AddCamera(camera);

@@ -1,0 +1,188 @@
+using System;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Linq;
+using System.Xml.Linq;
+using System.Collections.Concurrent;
+
+namespace MassaKWin.Core
+{
+    /// <summary>
+    /// Клиент для отправки OSD-текста на камеры Hikvision через ISAPI.
+    /// Рабочий метод подтвержден probe: PUT /overlays/text/{id} + application/xml + XML без namespace.
+    /// </summary>
+    public class HikvisionOsdClient : IDisposable
+    {
+        private readonly HttpClient _httpClient;
+        private const int DefaultChannelId = 1;
+
+        private static readonly TimeSpan NormalizedCacheDuration = TimeSpan.FromMinutes(10);
+        private static readonly (int Width, int Height) DefaultNormalizedSize = (704, 576);
+        private readonly ConcurrentDictionary<string, (int Width, int Height, DateTime CachedAtUtc)> _normalizedSizeCache;
+
+        private readonly Action<string> _log;
+
+        public HikvisionOsdClient(string username, string password, Action<string> logMessage = null)
+        {
+            var handler = new HttpClientHandler
+            {
+                // На части Hikvision PreAuthenticate=true может мешать Digest; оставим false.
+                PreAuthenticate = false,
+                Credentials = new NetworkCredential(username, password)
+            };
+
+            _httpClient = new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromSeconds(3)
+            };
+
+            _normalizedSizeCache = new ConcurrentDictionary<string, (int Width, int Height, DateTime CachedAtUtc)>();
+            _log = logMessage ?? (_ => { });
+        }
+
+        public async Task SendOverlayTextAsync(
+            string cameraIp,
+            int port,
+            int overlayId,
+            int posX,
+            int posY,
+            string text,
+            CancellationToken cancellationToken = default)
+        {
+            var url = $"http://{cameraIp}:{port}/ISAPI/System/Video/inputs/channels/{DefaultChannelId}/overlays/text/{overlayId}";
+            var xml = BuildTextOverlayXml(overlayId, posX, posY, text, enabled: true);
+
+            using (var content = new StringContent(xml, Encoding.UTF8))
+            {
+                // Важно: именно application/xml (как в вашем probe)
+                content.Headers.ContentType = new MediaTypeHeaderValue("application/xml") { CharSet = "utf-8" };
+
+                using (var response = await _httpClient.PutAsync(url, content, cancellationToken))
+                {
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        var body = await response.Content.ReadAsStringAsync();
+                        throw new InvalidOperationException(
+                            $"Hikvision OSD error: {(int)response.StatusCode} {response.ReasonPhrase}. Body: {body}");
+                    }
+                }
+            }
+
+            _log($"OSD OK: {cameraIp}:{port}, overlayId={overlayId}, x={posX}, y={posY}");
+        }
+
+        public async Task ClearOverlayAsync(
+            string cameraIp,
+            int port,
+            int overlayId,
+            CancellationToken cancellationToken = default)
+        {
+            var url = $"http://{cameraIp}:{port}/ISAPI/System/Video/inputs/channels/{DefaultChannelId}/overlays/text/{overlayId}";
+            var xml = BuildTextOverlayXml(overlayId, 0, 0, string.Empty, enabled: false);
+
+            using (var content = new StringContent(xml, Encoding.UTF8))
+            {
+                content.Headers.ContentType = new MediaTypeHeaderValue("application/xml") { CharSet = "utf-8" };
+
+                using (var response = await _httpClient.PutAsync(url, content, cancellationToken))
+                {
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        var body = await response.Content.ReadAsStringAsync();
+                        throw new InvalidOperationException(
+                            $"Hikvision OSD error: {(int)response.StatusCode} {response.ReasonPhrase}. Body: {body}");
+                    }
+                }
+            }
+        }
+
+        public async Task<(int Width, int Height)> GetNormalizedScreenSizeAsync(
+            string cameraIp,
+            int port,
+            CancellationToken cancellationToken = default)
+        {
+            var cacheKey = $"{cameraIp}:{port}";
+            if (_normalizedSizeCache.TryGetValue(cacheKey, out var cached) &&
+                DateTime.UtcNow - cached.CachedAtUtc < NormalizedCacheDuration)
+            {
+                return (cached.Width, cached.Height);
+            }
+
+            var url = $"http://{cameraIp}:{port}/ISAPI/System/Video/inputs/channels/{DefaultChannelId}/overlays";
+            using (var response = await _httpClient.GetAsync(url, cancellationToken))
+            {
+                if (!response.IsSuccessStatusCode)
+                {
+                    _normalizedSizeCache[cacheKey] = (DefaultNormalizedSize.Width, DefaultNormalizedSize.Height, DateTime.UtcNow);
+                    return DefaultNormalizedSize;
+                }
+
+                var xml = await response.Content.ReadAsStringAsync();
+                if (TryParseNormalizedSize(xml, out var width, out var height))
+                {
+                    _normalizedSizeCache[cacheKey] = (width, height, DateTime.UtcNow);
+                    return (width, height);
+                }
+            }
+
+            _normalizedSizeCache[cacheKey] = (DefaultNormalizedSize.Width, DefaultNormalizedSize.Height, DateTime.UtcNow);
+            return DefaultNormalizedSize;
+        }
+
+        public void Dispose()
+        {
+            _httpClient.Dispose();
+        }
+
+        // XML БЕЗ namespace (как показал ваш probe)
+        private static string BuildTextOverlayXml(int overlayId, int posX, int posY, string text, bool enabled)
+        {
+            var escapedText = System.Security.SecurityElement.Escape(text ?? string.Empty) ?? string.Empty;
+            var enabledText = enabled ? "true" : "false";
+
+            return $@"<TextOverlay>
+  <id>{overlayId}</id>
+  <enabled>{enabledText}</enabled>
+  <positionX>{posX}</positionX>
+  <positionY>{posY}</positionY>
+  <displayText>{escapedText}</displayText>
+  <directAngle></directAngle>
+</TextOverlay>";
+        }
+
+        private static bool TryParseNormalizedSize(string xml, out int width, out int height)
+        {
+            width = 0;
+            height = 0;
+
+            if (string.IsNullOrWhiteSpace(xml))
+                return false;
+
+            try
+            {
+                var doc = XDocument.Parse(xml);
+                var widthElement = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "normalizedScreenWidth");
+                var heightElement = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "normalizedScreenHeight");
+
+                if (widthElement == null || heightElement == null)
+                    return false;
+
+                if (!int.TryParse(widthElement.Value, out width))
+                    return false;
+
+                if (!int.TryParse(heightElement.Value, out height))
+                    return false;
+
+                return width > 0 && height > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+}

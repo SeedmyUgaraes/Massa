@@ -48,7 +48,7 @@ namespace MassaKWin.Core
   <positionX>{posX}</positionX>
   <positionY>{posY}</positionY>
   <displayText>{System.Security.SecurityElement.Escape(text)}</displayText>
-  <directAngle/>
+  <directAngle>0</directAngle>
 </TextOverlay>";
 
             using var content = new StringContent(xml, Encoding.UTF8, "application/xml");
@@ -73,7 +73,7 @@ namespace MassaKWin.Core
   <positionX>0</positionX>
   <positionY>0</positionY>
   <displayText></displayText>
-  <directAngle/>
+  <directAngle>0</directAngle>
 </TextOverlay>";
 
             using var content = new StringContent(xml, Encoding.UTF8, "application/xml");

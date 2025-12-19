@@ -12,7 +12,7 @@ namespace MassaKWin.Core
     {
         private const int MaxOverlayId = 4;
         private const int OverlayMarginLeft = 16;
-        private const int OverlayMarginBottom = 16;
+        private const int OverlayMarginBottom = 64;
         private readonly IList<Camera> _cameras;
         private readonly ScaleManager _scaleManager;
         private readonly TimeSpan _updateInterval;
@@ -229,7 +229,7 @@ namespace MassaKWin.Core
                         int positionY = (videoHeight - OverlayMarginBottom) - (lineIndex * lineHeight);
 
                         positionX = ClampPosition(camera, binding, positionX, "X", videoWidth);
-                        positionY = ClampPosition(camera, binding, positionY, "Y", videoHeight);
+                        positionY = ClampPosition(camera, binding, positionY, "Y", videoHeight - OverlayMarginBottom);
 
                         try
                         {

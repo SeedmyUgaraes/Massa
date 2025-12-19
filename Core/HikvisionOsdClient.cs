@@ -42,8 +42,7 @@ namespace MassaKWin.Core
             CancellationToken cancellationToken = default)
         {
             var url = $"http://{cameraIp}:{port}/ISAPI/System/Video/inputs/channels/1/overlays/text/{overlayId}";
-            var xml = $@"<?xml version=""1.0"" encoding=""UTF-8""?>
-<TextOverlay version=""2.0"" xmlns=""http://www.hikvision.com/ver20/XMLSchema"">
+            var xml = $@"<TextOverlay>
   <id>{overlayId}</id>
   <enabled>true</enabled>
   <positionX>{posX}</positionX>
@@ -68,8 +67,7 @@ namespace MassaKWin.Core
             CancellationToken cancellationToken = default)
         {
             var url = $"http://{cameraIp}:{port}/ISAPI/System/Video/inputs/channels/1/overlays/text/{overlayId}";
-            var xml = $@"<?xml version=""1.0"" encoding=""UTF-8""?>
-<TextOverlay version=""2.0"" xmlns=""http://www.hikvision.com/ver20/XMLSchema"">
+            var xml = $@"<TextOverlay>
   <id>{overlayId}</id>
   <enabled>false</enabled>
   <positionX>0</positionX>

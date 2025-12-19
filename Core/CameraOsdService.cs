@@ -12,7 +12,7 @@ namespace MassaKWin.Core
     {
         private const int MaxOverlayId = 4;
         private const int OverlayMarginLeft = 16;
-        private const int OverlayMarginBottom = 64;
+        private const int OverlayMarginBottom = 32;
         private readonly IList<Camera> _cameras;
         private readonly ScaleManager _scaleManager;
         private readonly TimeSpan _updateInterval;
@@ -33,7 +33,6 @@ namespace MassaKWin.Core
         private readonly ConcurrentDictionary<Guid, bool> _dirtyCameras;
         private readonly ConcurrentDictionary<Guid, DateTime> _lastStatusChecksUtc;
         private readonly ConcurrentDictionary<(Guid CameraId, int OverlayId, string Axis), bool> _positionClampWarnings;
-        private readonly ConcurrentDictionary<Guid, (int Width, int Height)> _resolutionCache;
 
         private static readonly TimeSpan MinOverlayUpdateInterval = TimeSpan.FromMilliseconds(100);
         private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromMilliseconds(5000);
@@ -71,7 +70,6 @@ namespace MassaKWin.Core
             _dirtyCameras = new ConcurrentDictionary<Guid, bool>();
             _lastStatusChecksUtc = new ConcurrentDictionary<Guid, DateTime>();
             _positionClampWarnings = new ConcurrentDictionary<(Guid, int, string), bool>();
-            _resolutionCache = new ConcurrentDictionary<Guid, (int Width, int Height)>();
         }
 
         public void MarkScaleDirty(Guid scaleId)
@@ -135,7 +133,6 @@ namespace MassaKWin.Core
             _dirtyCameras.Clear();
             _lastStatusChecksUtc.Clear();
             _positionClampWarnings.Clear();
-            _resolutionCache.Clear();
 
             lock (_statusLock)
             {
@@ -226,13 +223,14 @@ namespace MassaKWin.Core
                             continue;
                         }
 
-                        var (videoWidth, videoHeight) = await GetCameraResolutionAsync(camera, client, token);
-                        var lineHeight = Math.Max(camera.LineHeight, 1);
+                        var (normWidth, normHeight) = await client.GetNormalizedScreenSizeAsync(camera.Ip, camera.Port, token);
+                        var lineHeight = Math.Clamp(camera.LineHeight, 24, 40);
                         int positionX = OverlayMarginLeft;
-                        int positionY = (videoHeight - OverlayMarginBottom) - (lineIndex * lineHeight);
+                        int posYBottom = normHeight - OverlayMarginBottom;
+                        int positionY = posYBottom - (lineIndex * lineHeight);
 
-                        positionX = ClampPosition(camera, binding, positionX, "X", videoWidth);
-                        positionY = ClampPosition(camera, binding, positionY, "Y", videoHeight - OverlayMarginBottom);
+                        positionX = ClampPosition(camera, binding, positionX, "X", normWidth - 1);
+                        positionY = ClampPosition(camera, binding, positionY, "Y", normHeight - 1);
 
                         try
                         {
@@ -518,19 +516,6 @@ namespace MassaKWin.Core
                 .Replace("{tare}", tareText)
                 .Replace("{unit}", unitText)
                 .Replace("{status}", status);
-        }
-
-        private async Task<(int Width, int Height)> GetCameraResolutionAsync(
-            Camera camera,
-            HikvisionOsdClient client,
-            CancellationToken token)
-        {
-            if (_resolutionCache.TryGetValue(camera.Id, out var cached))
-                return cached;
-
-            var resolution = await client.GetVideoResolutionAsync(camera.Ip, camera.Port, token);
-            _resolutionCache[camera.Id] = resolution;
-            return resolution;
         }
 
         private class OverlayCacheEntry

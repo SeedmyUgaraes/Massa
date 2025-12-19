@@ -1434,6 +1434,7 @@ namespace MassaKWin
                     var cam = dlg.Camera;
 
                     ApplyOverlayDefaults(cam);
+                    cam.Bindings.Clear();
 
                     _cameraManager.Cameras.Add(cam);
                     SaveConfig();

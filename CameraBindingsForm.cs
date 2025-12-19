@@ -164,7 +164,7 @@ namespace MassaKWin
             {
                 try
                 {
-                    await client.ClearOverlayAsync(_camera.Ip, overlayId);
+                    await client.ClearOverlayAsync(_camera.Ip, _camera.Port, overlayId);
                 }
                 catch (OperationCanceledException)
                 {

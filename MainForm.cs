@@ -526,6 +526,24 @@ namespace MassaKWin
             };
 
             button.Values.Text = text;
+            // Читаемый цвет текста для навигации
+            var navText = Color.FromArgb(40, 40, 40);
+            var navTextDisabled = Color.FromArgb(150, 150, 150);
+
+            button.StateCommon.Content.ShortText.Color1 = navText;
+            button.StateCommon.Content.ShortText.Color2 = navText;
+
+            button.StateNormal.Content.ShortText.Color1 = navText;
+            button.StateNormal.Content.ShortText.Color2 = navText;
+
+            button.StateTracking.Content.ShortText.Color1 = navText;
+            button.StateTracking.Content.ShortText.Color2 = navText;
+
+            button.StatePressed.Content.ShortText.Color1 = navText;
+            button.StatePressed.Content.ShortText.Color2 = navText;
+
+            button.StateDisabled.Content.ShortText.Color1 = navTextDisabled;
+            button.StateDisabled.Content.ShortText.Color2 = navTextDisabled;
             button.Values.Image = icon;
             button.StateCommon.Content.ShortText.TextH = PaletteRelativeAlign.Near;
             button.StateCommon.Content.Padding = new Padding(12, 8, 12, 8);

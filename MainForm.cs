@@ -527,7 +527,6 @@ namespace MassaKWin
 
             button.Values.Text = text;
             button.Values.Image = icon;
-            button.StateCommon.Content.ImageH = PaletteRelativeAlign.Near;
             button.StateCommon.Content.ShortText.TextH = PaletteRelativeAlign.Near;
             button.StateCommon.Content.Padding = new Padding(12, 8, 12, 8);
             button.Click += (_, _) => ShowPage(page);

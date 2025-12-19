@@ -23,7 +23,7 @@ namespace MassaKWin.Core
         private static readonly (int Width, int Height) DefaultNormalizedSize = (704, 576);
         private readonly ConcurrentDictionary<string, (int Width, int Height, DateTime CachedAtUtc)> _normalizedSizeCache;
 
-        public HikvisionOsdClient(string username, string password)
+        public HikvisionOsdClient(string username, string password, Action<string>? logMessage = null)
         {
             var handler = new HttpClientHandler
             {
@@ -58,8 +58,17 @@ namespace MassaKWin.Core
             if (!response.IsSuccessStatusCode)
             {
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (IsInvalidXmlResponse(response.StatusCode, body))
+                {
+                    await UpdateOverlayViaListAsync(cameraIp, port, overlayId, posX, posY, text, cancellationToken);
+                    LogInfo($"OSD update via overlays (fallback), overlayId {overlayId}.");
+                    return;
+                }
+
                 throw new InvalidOperationException($"Hikvision OSD error: {(int)response.StatusCode} {response.ReasonPhrase}. Body: {body}");
             }
+
+            LogInfo($"OSD update via text/{overlayId}.");
         }
 
         public async Task ClearOverlayAsync(

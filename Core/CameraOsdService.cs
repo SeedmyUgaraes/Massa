@@ -91,7 +91,10 @@ namespace MassaKWin.Core
 
                 var cts = new CancellationTokenSource();
                 _tokens[camera.Id] = cts;
-                _clients[camera.Id] = new HikvisionOsdClient(camera.Username, camera.Password);
+                _clients[camera.Id] = new HikvisionOsdClient(
+                    camera.Username,
+                    camera.Password,
+                    message => LogMessage?.Invoke(message));
                 _tasks[camera.Id] = Task.Run(() => RunCameraLoopAsync(camera, cts.Token));
             }
         }

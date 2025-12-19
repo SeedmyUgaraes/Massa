@@ -11,6 +11,8 @@ namespace MassaKWin.Core
     public class CameraOsdService
     {
         private const int MaxOverlayId = 4;
+        private const int OverlayMarginLeft = 16;
+        private const int OverlayMarginBottom = 16;
         private readonly IList<Camera> _cameras;
         private readonly ScaleManager _scaleManager;
         private readonly TimeSpan _updateInterval;
@@ -31,6 +33,7 @@ namespace MassaKWin.Core
         private readonly ConcurrentDictionary<Guid, bool> _dirtyCameras;
         private readonly ConcurrentDictionary<Guid, DateTime> _lastStatusChecksUtc;
         private readonly ConcurrentDictionary<(Guid CameraId, int OverlayId, string Axis), bool> _positionClampWarnings;
+        private readonly ConcurrentDictionary<Guid, (int Width, int Height)> _resolutionCache;
 
         private static readonly TimeSpan MinOverlayUpdateInterval = TimeSpan.FromMilliseconds(100);
         private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromMilliseconds(5000);
@@ -68,6 +71,7 @@ namespace MassaKWin.Core
             _dirtyCameras = new ConcurrentDictionary<Guid, bool>();
             _lastStatusChecksUtc = new ConcurrentDictionary<Guid, DateTime>();
             _positionClampWarnings = new ConcurrentDictionary<(Guid, int, string), bool>();
+            _resolutionCache = new ConcurrentDictionary<Guid, (int Width, int Height)>();
         }
 
         public void MarkScaleDirty(Guid scaleId)
@@ -128,6 +132,7 @@ namespace MassaKWin.Core
             _dirtyCameras.Clear();
             _lastStatusChecksUtc.Clear();
             _positionClampWarnings.Clear();
+            _resolutionCache.Clear();
 
             lock (_statusLock)
             {
@@ -168,23 +173,27 @@ namespace MassaKWin.Core
                     var dirtyCamera = _dirtyCameras.ContainsKey(camera.Id);
                     var keepCameraDirty = false;
 
-                    var enabledLineIndex = 0;
-                    for (int i = 0; i < camera.Bindings.Count; i++)
-                    {
-                        var binding = camera.Bindings[i];
-                        if (!binding.Enabled)
-                            continue;
+                    var invalidBindings = camera.Bindings
+                        .Where(binding => binding.Enabled && !IsOverlayIdValid(binding.OverlayId))
+                        .ToList();
 
-                        if (!IsOverlayIdValid(binding.OverlayId))
-                        {
-                            LogWarn($"OSD binding skipped: invalid OverlayId {binding.OverlayId} for camera \"{camera.Name}\" ({camera.Ip}). Binding scale: {binding.Scale?.Name ?? "unknown"}.");
-                            continue;
-                        }
+                    foreach (var binding in invalidBindings)
+                    {
+                        LogWarn($"OSD binding skipped: invalid OverlayId {binding.OverlayId} for camera \"{camera.Name}\" ({camera.Ip}). Binding scale: {binding.Scale?.Name ?? "unknown"}.");
+                    }
+
+                    var orderedBindings = camera.Bindings
+                        .Where(binding => binding.Enabled && IsOverlayIdValid(binding.OverlayId))
+                        .OrderBy(binding => binding.OverlayId)
+                        .ToList();
+
+                    for (int i = 0; i < orderedBindings.Count; i++)
+                    {
+                        var binding = orderedBindings[i];
 
                         var scale = binding.Scale ?? _scaleManager.Scales.FirstOrDefault(s => s.Id == binding.Id);
                         var cacheKey = (camera.Id, binding.OverlayId);
-                        var lineIndex = enabledLineIndex;
-                        enabledLineIndex++;
+                        var lineIndex = i;
 
                         bool scaleDirty = scale != null && _dirtyScales.ContainsKey(scale.Id);
                         bool shouldProcess = dirtyCamera || scaleDirty;
@@ -214,18 +223,19 @@ namespace MassaKWin.Core
                             continue;
                         }
 
-                        int positionX = binding.AutoPosition ? camera.BasePosX : binding.PositionX;
-                        int positionY = binding.AutoPosition
-                            ? camera.BasePosY + lineIndex * camera.LineHeight
-                            : binding.PositionY;
+                        var (videoWidth, videoHeight) = await GetCameraResolutionAsync(camera, client, token);
+                        var lineHeight = Math.Max(camera.LineHeight, 1);
+                        int positionX = OverlayMarginLeft;
+                        int positionY = (videoHeight - OverlayMarginBottom) - (lineIndex * lineHeight);
 
-                        positionX = ClampPosition(camera, binding, positionX, "X");
-                        positionY = ClampPosition(camera, binding, positionY, "Y");
+                        positionX = ClampPosition(camera, binding, positionX, "X", videoWidth);
+                        positionY = ClampPosition(camera, binding, positionY, "Y", videoHeight);
 
                         try
                         {
                             await client.SendOverlayTextAsync(
                                 camera.Ip,
+                                camera.Port,
                                 binding.OverlayId,
                                 positionX,
                                 positionY,
@@ -324,18 +334,20 @@ namespace MassaKWin.Core
             UpdateCameraStatus(camera, false, reason);
         }
 
-        private int ClampPosition(Camera camera, CameraScaleBinding binding, int value, string axis)
+        private int ClampPosition(Camera camera, CameraScaleBinding binding, int value, string axis, int maxSize)
         {
-            if (value >= 0)
-                return value;
+            var maxValue = Math.Max(maxSize - 1, 0);
+            var clamped = Math.Clamp(value, 0, maxValue);
+            if (clamped == value)
+                return clamped;
 
             var key = (camera.Id, binding.OverlayId, axis);
             if (_positionClampWarnings.TryAdd(key, true))
             {
-                LogWarn($"OSD position clamped: camera \"{camera.Name}\" ({camera.Ip}), OverlayId {binding.OverlayId}, axis {axis}, value {value} -> 0.");
+                LogWarn($"OSD position clamped: camera \"{camera.Name}\" ({camera.Ip}), OverlayId {binding.OverlayId}, axis {axis}, value {value} -> {clamped} (max {maxValue}).");
             }
 
-            return 0;
+            return clamped;
         }
 
         private static bool IsOverlayIdValid(int overlayId)
@@ -503,6 +515,19 @@ namespace MassaKWin.Core
                 .Replace("{tare}", tareText)
                 .Replace("{unit}", unitText)
                 .Replace("{status}", status);
+        }
+
+        private async Task<(int Width, int Height)> GetCameraResolutionAsync(
+            Camera camera,
+            HikvisionOsdClient client,
+            CancellationToken token)
+        {
+            if (_resolutionCache.TryGetValue(camera.Id, out var cached))
+                return cached;
+
+            var resolution = await client.GetVideoResolutionAsync(camera.Ip, camera.Port, token);
+            _resolutionCache[camera.Id] = resolution;
+            return resolution;
         }
 
         private class OverlayCacheEntry

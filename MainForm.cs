@@ -1436,19 +1436,6 @@ namespace MassaKWin
 
                     ApplyOverlayDefaults(cam);
 
-                    int overlayId = 1;
-                    foreach (var scale in _scaleManager.Scales)
-                    {
-                        cam.Bindings.Add(new CameraScaleBinding
-                        {
-                            Camera = cam,
-                            Scale = scale,
-                            OverlayId = overlayId++,
-                            AutoPosition = true,
-                            Enabled = true
-                        });
-                    }
-
                     _cameraManager.Cameras.Add(cam);
                     SaveConfig();
                     await RecreateCameraOsdServiceAsync();
@@ -1811,6 +1798,7 @@ namespace MassaKWin
                 _settings.WeightDecimalPlaces);
 
             _cameraOsdService.CameraStatusChanged += OnCameraStatusChanged;
+            _cameraOsdService.LogMessage += AppendLog;
 
             _cameraOsdService.Start();
         }

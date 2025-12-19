@@ -14,11 +14,25 @@ namespace MassaKWin
     public partial class CameraBindingsForm : KryptonForm
     {
         private const int MaxOverlayId = 4;
+        private const int DefaultNormalizedWidth = 704;
+        private const int DefaultNormalizedHeight = 576;
+        private const int OverlayMarginLeft = 16;
+        private const int OverlayMarginBottom = 32;
         private readonly Camera _camera;
         private readonly ScaleManager _scaleManager;
         private DataGridView _dgvBindings = null!;
         private KryptonButton _btnOk = null!;
         private KryptonButton _btnCancel = null!;
+        private KryptonCheckBox _chkManualOsd = null!;
+        private NumericUpDown _numOsdX = null!;
+        private NumericUpDown _numOsdY = null!;
+        private Label _lblOsdHint = null!;
+        private Label _lblOsdWarning = null!;
+        private int _normalizedWidth = DefaultNormalizedWidth;
+        private int _normalizedHeight = DefaultNormalizedHeight;
+        private bool _normalizedSizeFallback;
+        private int? _pendingOsdX;
+        private int? _pendingOsdY;
 
         public CameraBindingsForm(Camera camera, ScaleManager scaleManager)
         {
@@ -28,6 +42,14 @@ namespace MassaKWin
             InitializeComponent();
             ThemeManager.Apply(this);
             FillBindings();
+            _pendingOsdX = _camera.OsdBasePosX;
+            _pendingOsdY = _camera.OsdBasePosY;
+            _chkManualOsd.Checked = _pendingOsdX.HasValue && _pendingOsdY.HasValue;
+            UpdateManualControls();
+            ApplyNormalizedRanges();
+            ApplyOsdValues();
+            UpdateOsdHint();
+            Shown += async (_, _) => await LoadNormalizedSizeAsync();
         }
 
         private void FillBindings()
@@ -57,6 +79,8 @@ namespace MassaKWin
             var newBindings = BuildBindingsFromGrid();
             if (newBindings == null)
                 return;
+
+            ApplyOsdSettings();
 
             await ClearCameraOverlaysAsync();
 
@@ -187,11 +211,130 @@ namespace MassaKWin
             Close();
         }
 
+        private void ApplyOsdSettings()
+        {
+            if (!_chkManualOsd.Checked)
+            {
+                _camera.OsdBasePosX = null;
+                _camera.OsdBasePosY = null;
+                return;
+            }
+
+            var baseX = (int)_numOsdX.Value;
+            var baseY = (int)_numOsdY.Value;
+            var maxX = Math.Max(_normalizedWidth - 1, 0);
+            var maxY = Math.Max(_normalizedHeight - 1, 0);
+            baseX = Math.Clamp(baseX, 0, maxX);
+            baseY = Math.Clamp(baseY, 0, maxY);
+
+            var lineHeight = Math.Clamp(_camera.LineHeight, 18, 48);
+            var requiredMinY = (MaxOverlayId - 1) * lineHeight;
+            if (baseY < requiredMinY)
+            {
+                var adjustedY = Math.Min(requiredMinY, maxY);
+                if (adjustedY != baseY)
+                {
+                    baseY = adjustedY;
+                    MessageBox.Show(
+                        $"Значение OSD Y было повышено до {baseY}, чтобы все строки оверлея оставались в пределах экрана.",
+                        "Предупреждение",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
+            }
+
+            SetNumericValue(_numOsdX, baseX);
+            SetNumericValue(_numOsdY, baseY);
+
+            _camera.OsdBasePosX = baseX;
+            _camera.OsdBasePosY = baseY;
+        }
+
+        private async Task LoadNormalizedSizeAsync()
+        {
+            _normalizedSizeFallback = false;
+            try
+            {
+                using var client = new HikvisionOsdClient(_camera.Username, _camera.Password);
+                var (width, height) = await client.GetNormalizedScreenSizeAsync(_camera.Ip, _camera.Port);
+                _normalizedWidth = width;
+                _normalizedHeight = height;
+            }
+            catch
+            {
+                _normalizedWidth = DefaultNormalizedWidth;
+                _normalizedHeight = DefaultNormalizedHeight;
+                _normalizedSizeFallback = true;
+            }
+
+            ApplyNormalizedRanges();
+            ApplyOsdValues();
+            UpdateOsdHint();
+        }
+
+        private void ApplyNormalizedRanges()
+        {
+            _numOsdX.Minimum = 0;
+            _numOsdX.Maximum = Math.Max(_normalizedWidth - 1, 0);
+            _numOsdY.Minimum = 0;
+            _numOsdY.Maximum = Math.Max(_normalizedHeight - 1, 0);
+
+            SetNumericValue(_numOsdX, (int)_numOsdX.Value);
+            SetNumericValue(_numOsdY, (int)_numOsdY.Value);
+        }
+
+        private void ApplyOsdValues()
+        {
+            if (_chkManualOsd.Checked && _pendingOsdX.HasValue && _pendingOsdY.HasValue)
+            {
+                SetNumericValue(_numOsdX, _pendingOsdX.Value);
+                SetNumericValue(_numOsdY, _pendingOsdY.Value);
+                _pendingOsdX = null;
+                _pendingOsdY = null;
+                return;
+            }
+
+            if (!_chkManualOsd.Checked)
+            {
+                var autoX = OverlayMarginLeft;
+                var autoY = Math.Max(_normalizedHeight - OverlayMarginBottom, 0);
+                SetNumericValue(_numOsdX, autoX);
+                SetNumericValue(_numOsdY, autoY);
+            }
+        }
+
+        private void UpdateManualControls()
+        {
+            var enabled = _chkManualOsd.Checked;
+            _numOsdX.Enabled = enabled;
+            _numOsdY.Enabled = enabled;
+            _lblOsdWarning.Visible = enabled;
+        }
+
+        private void UpdateOsdHint()
+        {
+            var fallbackText = _normalizedSizeFallback ? " (используется fallback)" : string.Empty;
+            _lblOsdHint.Text = $"Координаты в системе normalizedScreenSize Hikvision (обычно 704×576). Текущий размер: {_normalizedWidth}×{_normalizedHeight}{fallbackText}.";
+        }
+
+        private static void SetNumericValue(NumericUpDown numeric, int value)
+        {
+            var min = (int)numeric.Minimum;
+            var max = (int)numeric.Maximum;
+            var clamped = Math.Clamp(value, min, max);
+            numeric.Value = clamped;
+        }
+
         private void InitializeComponent()
         {
             _dgvBindings = new DataGridView();
             _btnOk = new KryptonButton();
             _btnCancel = new KryptonButton();
+            _chkManualOsd = new KryptonCheckBox();
+            _numOsdX = new NumericUpDown();
+            _numOsdY = new NumericUpDown();
+            _lblOsdHint = new Label();
+            _lblOsdWarning = new Label();
 
             SuspendLayout();
 
@@ -207,10 +350,11 @@ namespace MassaKWin
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 2,
+                RowCount = 3,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink
             };
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
@@ -222,6 +366,58 @@ namespace MassaKWin
             _dgvBindings.MultiSelect = false;
             _dgvBindings.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             StyleBindingsGrid();
+
+            _chkManualOsd.Text = "Ручные координаты";
+            _chkManualOsd.AutoSize = true;
+            _chkManualOsd.CheckedChanged += (_, _) => UpdateManualControls();
+
+            _numOsdX.Minimum = 0;
+            _numOsdX.Maximum = DefaultNormalizedWidth - 1;
+            _numOsdX.Width = 120;
+
+            _numOsdY.Minimum = 0;
+            _numOsdY.Maximum = DefaultNormalizedHeight - 1;
+            _numOsdY.Width = 120;
+
+            _lblOsdHint.AutoSize = true;
+            _lblOsdHint.ForeColor = System.Drawing.Color.DimGray;
+
+            _lblOsdWarning.AutoSize = true;
+            _lblOsdWarning.ForeColor = System.Drawing.Color.DarkGoldenrod;
+            _lblOsdWarning.Text = "Если Y слишком низкий, значение будет автоматически увеличено, чтобы все строки оверлея были видимы.";
+
+            var osdPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 2,
+                Padding = new Padding(0, 0, 0, 8)
+            };
+            osdPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            osdPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            var osdXLabel = new Label { Text = "OSD X (0..W-1)", AutoSize = true, Anchor = AnchorStyles.Left };
+            var osdYLabel = new Label { Text = "OSD Y (0..H-1)", AutoSize = true, Anchor = AnchorStyles.Left };
+
+            osdPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            osdPanel.Controls.Add(_chkManualOsd, 0, 0);
+            osdPanel.SetColumnSpan(_chkManualOsd, 2);
+
+            osdPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            osdPanel.Controls.Add(osdXLabel, 0, 1);
+            osdPanel.Controls.Add(_numOsdX, 1, 1);
+
+            osdPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            osdPanel.Controls.Add(osdYLabel, 0, 2);
+            osdPanel.Controls.Add(_numOsdY, 1, 2);
+
+            osdPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            osdPanel.Controls.Add(_lblOsdHint, 0, 3);
+            osdPanel.SetColumnSpan(_lblOsdHint, 2);
+
+            osdPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            osdPanel.Controls.Add(_lblOsdWarning, 0, 4);
+            osdPanel.SetColumnSpan(_lblOsdWarning, 2);
 
             var enabledColumn = new DataGridViewCheckBoxColumn
             {
@@ -271,8 +467,9 @@ namespace MassaKWin
             AcceptButton = _btnOk;
             CancelButton = _btnCancel;
 
-            layout.Controls.Add(_dgvBindings, 0, 0);
-            layout.Controls.Add(buttonsPanel, 0, 1);
+            layout.Controls.Add(osdPanel, 0, 0);
+            layout.Controls.Add(_dgvBindings, 0, 1);
+            layout.Controls.Add(buttonsPanel, 0, 2);
 
             Controls.Add(layout);
 

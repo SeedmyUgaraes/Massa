@@ -15,6 +15,8 @@ namespace MassaKWin.Core
         public int BasePosX { get; set; } = 100;
         public int BasePosY { get; set; } = 100;
         public int LineHeight { get; set; } = 40;
+        public int? OsdBasePosX { get; set; }
+        public int? OsdBasePosY { get; set; }
 
         public List<CameraScaleBinding> Bindings { get; set; } = new List<CameraScaleBinding>();
     }
